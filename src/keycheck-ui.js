@@ -24,7 +24,7 @@ export function initKeyCheck(ctx) {
 
   function badge(r) {
     if (!r) return '<span class="kc-badge wait">Đang kiểm tra…</span>';
-    const cls = r.ok ? 'ok' : (/quota_min|server|network/.test(r.code) ? 'warn' : 'bad');
+    const cls = r.code === 'busy' ? 'warn' : r.ok ? 'ok' : (/quota_min|server|network/.test(r.code) ? 'warn' : 'bad');
     return `<span class="kc-badge ${cls}">${esc(r.label)}</span>`;
   }
 
@@ -93,7 +93,7 @@ export function initKeyCheck(ctx) {
 
   // Working keys first: "ok" sorted by speed; then temporary problems (per-minute quota) which may recover.
   function goodKeys() {
-    return results.filter(x => x.res?.ok).sort((a, b) => a.res.ms - b.res.ms).map(x => x.key);
+    return results.filter(x => x.res?.ok).sort((a, b) => ((a.res.code === 'busy') - (b.res.code === 'busy')) || (a.res.ms - b.res.ms)).map(x => x.key);
   }
 
   $('#btnKeyCheck').addEventListener('click', open);

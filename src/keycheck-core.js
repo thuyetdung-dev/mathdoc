@@ -29,7 +29,7 @@ function parseError(status, j) {
   if (/location is not supported|User location/i.test(msg)) return { code: 'region', label: 'Vùng không hỗ trợ', detail: msg.slice(0, 160) };
   if (status === 403 || e.status === 'PERMISSION_DENIED') return { code: 'denied', label: 'Bị từ chối', detail: msg.slice(0, 160) };
   if (status === 404) return { code: 'model', label: 'Mô hình không dùng được', detail: msg.slice(0, 160) };
-  if (status >= 500) return { code: 'server', label: 'Google đang lỗi', detail: 'Lỗi phía Google, thử lại sau ít phút.' };
+  if (status >= 500 || /UNAVAILABLE|high demand|overloaded/i.test(e.status + ' ' + msg)) return { code: 'server', label: 'Google đang quá tải', detail: 'Mô hình đang quá tải phía Google, thử lại sau ít phút.' };
   return { code: 'error', label: `Lỗi ${status || ''}`.trim(), detail: msg.slice(0, 160) || 'Không rõ nguyên nhân.' };
 }
 
@@ -56,21 +56,40 @@ export async function checkKey(key, { model, fetchImpl = fetch, signal } = {}) {
     if (e.name === 'AbortError') throw e;
     return { ok: false, code: 'network', label: 'Lỗi mạng', detail: String(e.message || e), models: 0, ms: Date.now() - t0 };
   }
-  const testModel = model && model !== 'auto' ? model : pickTestModel(ids);
-  try {
-    const r = await fetchImpl(`${BASE}/models/${encodeURIComponent(testModel)}:generateContent`, {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Trả lời đúng một chữ: OK' }] }], generationConfig: { maxOutputTokens: 64, temperature: 0 } }),
-    });
-    const j = await r.json().catch(() => ({}));
-    const ms = Date.now() - t0;
-    if (!r.ok) return { ok: false, ...parseError(r.status, j), models: ids.length, testModel, ms };
-    return { ok: true, code: 'ok', label: 'Dùng được', detail: `Gọi thử ${testModel} thành công.`, models: ids.length, testModel, ms };
-  } catch (e) {
-    if (e.name === 'AbortError') throw e;
-    return { ok: false, code: 'network', label: 'Lỗi mạng', detail: String(e.message || e), models: ids.length, testModel, ms: Date.now() - t0 };
+  const first = model && model !== 'auto' ? model : pickTestModel(ids);
+  const candidates = [...new Set([first, ...stableFlash(ids), 'gemini-2.5-flash'])].slice(0, 3);
+  let busy = null, last = null;
+  for (const testModel of candidates) {
+    try {
+      const r = await fetchImpl(`${BASE}/models/${encodeURIComponent(testModel)}:generateContent`, {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Trả lời đúng một chữ: OK' }] }], generationConfig: { maxOutputTokens: 64, temperature: 0 } }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const note = testModel !== first ? ` (${first} đang bận/không dùng được, đã thử ${testModel})` : '';
+        return { ok: true, code: 'ok', label: 'Dùng được', detail: `Gọi thử ${testModel} thành công${note}.`, models: ids.length, testModel, ms: Date.now() - t0 };
+      }
+      const err = parseError(r.status, j);
+      last = { ...err, testModel };
+      if (err.code === 'server' || err.code === 'model') { if (err.code === 'server') busy = testModel; continue; }   // overloaded or missing model → try another model
+      if (err.code === 'quota_day' || err.code === 'no_quota') continue;   // free-tier quota is per model → another model may still work
+      return { ok: false, ...err, models: ids.length, testModel, ms: Date.now() - t0 };
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      last = { code: 'network', label: 'Lỗi mạng', detail: String(e.message || e), testModel };
+    }
   }
+  if (busy && last?.code === 'server') {
+    // Key is valid (model list worked); Google is just overloaded right now.
+    return { ok: true, code: 'busy', label: 'Dùng được (Google đang bận)', detail: `Khoá hợp lệ nhưng ${candidates.join(', ')} đang quá tải. Thử lại sau ít phút.`, models: ids.length, testModel: busy, ms: Date.now() - t0 };
+  }
+  return { ok: false, ...last, models: ids.length, ms: Date.now() - t0 };
+}
+
+function stableFlash(ids) {
+  return ids.filter(id => /^gemini-\d+(\.\d+)?-flash$/.test(id)).sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
 }
 
 /** Run checks with limited parallelism; onResult(index, result) as each finishes. */

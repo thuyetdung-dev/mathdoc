@@ -39,6 +39,22 @@ export function pickAuto(models) {
 
 const RETRY_KEY = /429|RESOURCE_EXHAUSTED|quota|rate|API key|API_KEY|PERMISSION_DENIED|403|401/i;
 const MODEL_MISSING = /404|NOT_FOUND|not found|is not supported|no longer available/i;
+const TRANSIENT = /\b(500|502|503|504)\b|UNAVAILABLE|INTERNAL|DEADLINE_EXCEEDED|overloaded|high demand|try again later/i;
+const BUSY_WAIT = [4000, 10000];
+const shortMsg = m => m.length > 160 ? m.slice(0, 157) + '…' : m;
+function sleep(ms, signal) {
+  return new Promise((res, rej) => {
+    const t = setTimeout(res, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(t); rej(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true });
+  });
+}
+
+/** Fallback order: the chosen model, then other stable flash models (newest first), then a built-in chain. */
+export function fallbackChain(first, models = []) {
+  const flash = models.map(m => m.id).filter(id => /^gemini-\d+(\.\d+)?-flash$/.test(id)).sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
+  const lite = models.map(m => m.id).filter(id => /^gemini-\d+(\.\d+)?-flash-lite$/.test(id)).sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
+  return [...new Set([first, ...flash, ...AUTO_CHAIN, ...lite.slice(0, 1)].filter(Boolean))].slice(0, 4);
+}
 
 async function streamOnce({ conn, key, model, body, onText, signal }) {
   const r = conn.mode === 'school'
@@ -90,7 +106,9 @@ export async function generate({ conn, models, parts, maxOutputTokens, onText, o
   };
   const keys = conn.mode === 'school' ? [null] : conn.keys;
   let lastErr;
-  for (const model of models) {
+  for (let mi = 0; mi < models.length; mi++) {
+    const model = models[mi];
+    let busyRetries = 0;
     for (let k = 0; k < keys.length; k++) {
       try {
         const res = await streamOnce({ conn, key: keys[k], model, body, onText, signal });
@@ -99,13 +117,24 @@ export async function generate({ conn, models, parts, maxOutputTokens, onText, o
         if (e.name === 'AbortError') throw e;
         lastErr = e;
         const who = conn.mode === 'school' ? 'Khoá chung' : `Khoá #${k + 1}`;
-        onLog?.(`${who} · ${model}: ${e.message}`);
-        if (MODEL_MISSING.test(e.message)) break;               // try next model
-        if (RETRY_KEY.test(e.message) && k < keys.length - 1) { onLog?.(`→ Chuyển sang khoá dự phòng #${k + 2}`); continue; }
-        throw e;
+        onLog?.(`${who} · ${model}: ${shortMsg(e.message)}`);
+        if (MODEL_MISSING.test(e.message)) break;                       // model gone → next model
+        if (TRANSIENT.test(e.message)) {                                // Google overloaded → wait, retry, then next model
+          if (busyRetries < BUSY_WAIT.length) {
+            const w = BUSY_WAIT[busyRetries++];
+            onLog?.(`→ ${model} đang quá tải, chờ ${w / 1000} giây rồi thử lại (${busyRetries}/${BUSY_WAIT.length})`);
+            await sleep(w, signal); k--; continue;
+          }
+          break;
+        }
+        if (RETRY_KEY.test(e.message)) {
+          if (k < keys.length - 1) { onLog?.(`→ Chuyển sang khoá dự phòng #${k + 2}`); continue; }
+          break;                                                        // all keys out of quota for this model → next model
+        }
+        throw e;                                                        // other errors: stop
       }
     }
-    if (models.length > 1) onLog?.(`→ Thử mô hình khác`);
+    if (mi < models.length - 1) onLog?.(`→ Chuyển sang mô hình ${models[mi + 1]}`);
   }
   throw lastErr || new Error('Không gọi được Gemini.');
 }

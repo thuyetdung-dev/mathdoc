@@ -1,7 +1,7 @@
 import temml from 'temml';
 import { parseBlocks } from './md.js';
 import { buildDocx } from './docx.js';
-import { listModels, generate, relocate, pickAuto, AUTO_CHAIN } from './gemini.js';
+import { listModels, generate, relocate, pickAuto, fallbackChain } from './gemini.js';
 import { initKeyCheck } from './keycheck-ui.js';
 import { openPdf, renderPdfPage, fileToDataUrl, imageFileToCanvas, canvasToJpeg, cropBox } from './pages.js';
 
@@ -68,9 +68,8 @@ function connection() {
 /** Model ids to try: the chosen one, or an automatic chain. */
 function modelChain() {
   const v = $('#modelSel').value;
-  if (v && v !== 'auto') return [v];
-  const best = state.models.length ? pickAuto(state.models) : null;
-  return [...new Set([best, ...AUTO_CHAIN].filter(Boolean))];
+  const first = v && v !== 'auto' ? v : (state.models.length ? pickAuto(state.models) : null);
+  return fallbackChain(first, state.models);
 }
 function setKeyStatus(stateName, text) {
   const el = $('#keyStatus'); el.dataset.state = stateName; el.querySelector('.txt').textContent = text;
@@ -285,11 +284,11 @@ async function run() {
     if (approx > 19.5 * 1048576) throw new Error('Dữ liệu gửi đi vượt ~20 MB. Hãy giảm số trang hoặc bỏ chọn “Gửi kèm ảnh tham chiếu”.');
     if (conn.mode === 'school' && approx > 4.2 * 1048576) throw new Error(`Dữ liệu ${fmtSize(approx)} vượt giới hạn ~4 MB của khoá chung. Hãy giảm số trang, bỏ “Gửi kèm ảnh tham chiếu”, hoặc dùng khoá cá nhân.`);
 
-    setBusy(true, `Gemini (${model}${chain.length > 1 ? ', tự động' : ''}) đang đọc tài liệu…`);
+    setBusy(true, `Gemini (${model}) đang đọc tài liệu…`);
     let lastPaint = 0;
     const res = await generate({
       conn, models: chain, parts, signal: state.abort.signal,
-      onLog: m => log(m, 'warn'),
+      onLog: msg => { log(msg, 'warn'); if (msg.startsWith('→')) $('#progressLabel').textContent = msg.slice(2); },
       onText: t => {
         const now = performance.now();
         if (now - lastPaint > 250) { lastPaint = now; $('#editor').value = t; $('#editor').scrollTop = $('#editor').scrollHeight; $('#progressLabel').textContent = `Đang nhận kết quả… ${t.length.toLocaleString('vi-VN')} ký tự`; }
