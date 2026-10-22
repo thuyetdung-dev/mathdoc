@@ -11,16 +11,36 @@ const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/mai
   'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
   'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
 
-const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const esc = s => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const CONTENT_W_TW = 9638;          // 17 cm in twips
 const CONTENT_W_EMU = 6120000;      // 17 cm in EMU
+
+// mathml2omml does not escape "<", ">" and "&" inside text/attributes → Word refuses the file.
+const escText = t => t.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const M_NS = 'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+
+function wellFormed(xml) {
+  if (typeof DOMParser === 'undefined') return true;
+  const doc = new DOMParser().parseFromString(`<r ${M_NS}>${xml}</r>`, 'application/xml');
+  return !doc.getElementsByTagName('parsererror').length;
+}
 
 export function texToOmml(tex) {
   const mml = temml.renderToString(tex, { xml: true, throwOnError: true, displayMode: false });
   let o = mml2omml(mml);
-  // strip duplicated namespace declarations (declared on the root)
   o = o.replace(/ xmlns:m="[^"]*"/g, '').replace(/ xmlns:w="[^"]*"/g, '')
-    .replace(/<m:argPr><m:scrLvl m:val="0"\/><\/m:argPr>/g, '');
+    .replace(/<m:argPr><m:scrLvl m:val="0"\/><\/m:argPr>/g, '')
+    .replace(/(<m:t(?: [^>]*)?>)([\s\S]*?)(<\/m:t>)/g, (_, a, t, b) => a + escText(t) + b)
+    .replace(/(m:val=")([^"]*)(")/g, (_, a, v, b) => a + escText(v) + b)
+    .replace(/<m:e\/>/g, '<m:e><m:r><m:t></m:t></m:r></m:e>')
+    // schema fixes for Word: no empty w:rPr, m:rPr must come before w:rPr, no "undefined" enum values
+    .replace(/<w:rPr\/>/g, '')
+    .replace(/(<w:rPr>[\s\S]*?<\/w:rPr>)(<m:rPr>[\s\S]*?<\/m:rPr>)/g, '$2$1')
+    .replace(/<m:sty m:val="(?!(p|b|i|bi)")[^"]*"\/>/g, '<m:sty m:val="p"/>')
+    .replace(/<m:(\w+) m:val="(undefined|null|NaN|)"\/>/g, '')
+    .replace(/<m:chr m:val="([^"]*)" m:pos="([^"]*)"\/>/g, '<m:chr m:val="$1"/><m:pos m:val="$2"/>')   // pos is an element, not an attribute
+    .replace(/<m:rPr>([\s\S]*?)<\/m:rPr>/g, (all, inner) => /<m:nor\/>/.test(inner) ? `<m:rPr>${inner.replace(/<m:sty [^>]*\/>|<m:scr [^>]*\/>/g, '')}</m:rPr>` : all);
+  if (!wellFormed(o)) throw new Error('OMML không hợp lệ');
   return o;
 }
 
@@ -137,7 +157,13 @@ export async function buildDocx(markdown, images, opts = {}) {
   }
 
   const sect = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>';
-  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body}${sect}</w:body></w:document>`);
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body}${sect}</w:body></w:document>`;
+  if (typeof DOMParser !== 'undefined') {
+    const chk = new DOMParser().parseFromString(docXml, 'application/xml');
+    const pe = chk.getElementsByTagName('parsererror')[0];
+    if (pe) throw new Error('File Word tạo ra bị lỗi cấu trúc XML: ' + pe.textContent.slice(0, 200));
+  }
+  zip.file('word/document.xml', docXml);
   zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${rels.join('')}</Relationships>`);
   zip.file('word/styles.xml', stylesXml(fontName, fontSize));
   zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
