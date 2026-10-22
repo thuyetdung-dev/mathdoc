@@ -146,6 +146,35 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
 .key-status[data-state="err"] .dot{background:var(--err)}
 .key-status[data-state="err"]{color:var(--err)}
 .key-status[data-state="busy"] .dot{background:var(--warn)}
+
+.kc-open{width:100%;margin-top:8px;font-size:13px;border-style:dashed;color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+#keyDialog{border:1px solid var(--line);border-radius:14px;padding:0;width:min(860px,calc(100% - 24px));background:var(--surface);color:var(--ink);box-shadow:0 20px 50px rgba(0,0,0,.25)}
+#keyDialog::backdrop{background:rgba(10,20,25,.45)}
+.kc-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.kc-head h3{margin:0;font-size:16px}
+.kc-x{border:0;background:none;font-size:16px;padding:4px 8px}
+#kcPersonal,#kcSchool{padding:12px 18px 0}
+.kc-intro{font-size:13px;color:var(--ink-2);margin:0 0 8px}
+.kc-actions{display:flex;gap:8px;margin-top:8px}
+.kc-actions .kc-run{width:auto;padding:9px 18px;font-size:14px}
+.kc-tablewrap{padding:12px 18px;max-height:46vh;overflow:auto}
+#kcTable{width:100%;border-collapse:collapse;font-size:13px}
+#kcTable th{text-align:left;color:var(--ink-3);font-weight:600;font-size:12px;border-bottom:1px solid var(--line);padding:6px}
+#kcTable td{border-bottom:1px solid var(--line);padding:7px 6px;vertical-align:top}
+.kc-key{font-family:var(--mono);white-space:nowrap}
+.kc-detail{color:var(--ink-2)} .kc-dim{color:var(--ink-3)}
+.kc-ms{white-space:nowrap;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.kc-empty{text-align:center;color:var(--ink-3);padding:18px}
+.kc-badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.kc-badge.ok{background:var(--accent-soft);color:var(--ok)}
+.kc-badge.bad{background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err)}
+.kc-badge.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.kc-badge.wait{background:var(--surface-2);color:var(--ink-3)}
+.kc-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 18px;border-top:1px solid var(--line)}
+.kc-foot .spacer{flex:1}
+.kc-foot .main{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+#kcSummary{font-size:13px;font-weight:600}
+@media (max-width:640px){#kcTable th:nth-child(4),#kcTable td:nth-child(4){display:none}}
 </style>
 </head>
 <body data-view="split">
@@ -177,6 +206,7 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
             <summary>Khoá dự phòng <span id="backupCount"></span></summary>
             <textarea id="keysBackup" class="masked" rows="2" spellcheck="false" placeholder="Mỗi dòng một khoá. Khi khoá chính hết lượt, app tự chuyển sang khoá tiếp theo."></textarea>
           </details>
+          <button type="button" class="kc-open" id="btnKeyCheck">🔍 Tự dò khoá dùng được</button>
           <label class="check"><input type="checkbox" id="remember"><span>Ghi nhớ khoá trên máy này <span class="muted">(không bật trên máy dùng chung)</span></span></label>
         </div>
 
@@ -186,6 +216,7 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
             <input type="password" id="accessCode" autocomplete="off" spellcheck="false" placeholder="Nhập mã do tổ trưởng cung cấp">
             <button type="button" id="showCode" aria-label="Hiện mã truy cập">Hiện</button>
           </div>
+          <button type="button" class="kc-open" id="btnKeyCheckSchool">🔍 Kiểm tra khoá chung của tổ</button>
           <p class="key-note">Khoá Gemini nằm trên máy chủ Vercel, trình duyệt không nhìn thấy. Mỗi lần gửi tối đa khoảng 4 MB dữ liệu (PDF quét dày nên tách nhỏ); tài liệu lớn hơn hãy dùng khoá cá nhân.</p>
         </div>
 
@@ -276,6 +307,26 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
   </section>
 </main>
 <footer>MathDoc · Tổ Toán – Trường THPT Phan Đăng Lưu</footer>
+<dialog id="keyDialog" aria-labelledby="kcTitle">
+  <div class="kc-head"><h3 id="kcTitle">Tự dò khoá Gemini dùng được</h3><button type="button" id="kcClose" class="kc-x" aria-label="Đóng">✕</button></div>
+  <div id="kcPersonal">
+    <p class="kc-intro">Dán các khoá của thầy cô (mỗi dòng một khoá). App gọi thử từng khoá: khoá có đúng không, có bật Gemini API không, còn lượt dùng không. Khoá chỉ được gửi tới Google.</p>
+    <textarea id="kcInput" rows="4" spellcheck="false" placeholder="AIza…&#10;AIza…"></textarea>
+    <div class="kc-actions"><button type="button" class="primary kc-run" id="kcRun">Bắt đầu kiểm tra</button><button type="button" id="kcStop" hidden>Dừng</button></div>
+  </div>
+  <div id="kcSchool" hidden>
+    <p class="kc-intro">Máy chủ kiểm tra từng khoá trong biến GEMINI_API_KEY và chỉ trả về khoá đã che bớt.</p>
+    <div class="kc-actions"><button type="button" class="primary kc-run" id="kcRunSchool">Kiểm tra lại</button></div>
+  </div>
+  <div class="kc-tablewrap"><table id="kcTable"><thead><tr><th>#</th><th>Khoá</th><th>Trạng thái</th><th>Chi tiết</th><th>Thời gian</th></tr></thead><tbody></tbody></table></div>
+  <div class="kc-foot">
+    <span id="kcSummary" role="status" aria-live="polite"></span>
+    <span class="spacer"></span>
+    <button type="button" id="kcRemoveBad" disabled>Bỏ khoá hỏng</button>
+    <button type="button" id="kcCopy" disabled>Sao chép khoá tốt</button>
+    <button type="button" class="main" id="kcApply" disabled>Dùng các khoá tốt</button>
+  </div>
+</dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 <script type="module">/*APP*/</script>
 </body>

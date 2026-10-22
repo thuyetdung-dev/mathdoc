@@ -27,3 +27,7 @@ Trong Vercel → Project mathdoc → Settings → Environment Variables, thêm:
 - `MATHDOC_ACCESS_CODE`: mã truy cập phát cho giáo viên trong tổ
 Sau đó Redeploy. Thiếu một trong hai biến thì chế độ khoá chung tự khoá lại.
 Giới hạn của Vercel: mỗi lần gửi tối đa ~4,5 MB.
+
+## Tự dò khoá dùng được
+Nút “🔍 Tự dò khoá dùng được”: dán nhiều khoá, app gọi thử từng khoá (đúng/sai, đã bật Gemini API chưa, còn lượt trong ngày/phút không), rồi “Dùng các khoá tốt” để đặt khoá nhanh nhất làm khoá chính, các khoá còn lại làm dự phòng.
+Ở chế độ khoá chung, máy chủ kiểm tra các khoá trong GEMINI_API_KEY và chỉ trả về khoá đã che bớt (`/api/keycheck`).

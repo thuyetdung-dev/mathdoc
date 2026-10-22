@@ -2,6 +2,7 @@ import temml from 'temml';
 import { parseBlocks } from './md.js';
 import { buildDocx } from './docx.js';
 import { listModels, generate, relocate, pickAuto, AUTO_CHAIN } from './gemini.js';
+import { initKeyCheck } from './keycheck-ui.js';
 import { openPdf, renderPdfPage, fileToDataUrl, imageFileToCanvas, canvasToJpeg, cropBox } from './pages.js';
 
 const $ = s => document.querySelector(s);
@@ -148,6 +149,14 @@ function initSettings() {
     toast('Đã xoá khoá Gemini khỏi phiên này');
   });
   $('#btnScan').addEventListener('click', scanModels);
+  initKeyCheck({
+    mode: keyMode, code: () => $('#accessCode').value.trim(), model: () => $('#modelSel').value,
+    getKeys: keys, log, toast,
+    setKeys: list => {
+      $('#key1').value = list[0] || ''; $('#keysBackup').value = list.slice(1).join('\n');
+      save(); setKeyStatus('ok', `${list.length} khoá dùng được · khoá chính ${list[0] ? list[0].slice(0, 6) + '…' + list[0].slice(-4) : '—'}`);
+    },
+  });
 }
 
 function resetModelList() {
