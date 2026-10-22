@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MathDoc – PDF/Ảnh sang Word</title>
+<meta name="description" content="Chuyển đề, tài liệu Toán từ PDF hoặc ảnh sang Word có công thức Equation và hình vẽ, dùng Gemini, chạy trên trình duyệt.">
+<style>
+:root{
+  --bg:#f4f6f8;--surface:#ffffff;--surface-2:#f8fafb;--ink:#14212b;--ink-2:#4a5a66;--ink-3:#7b8a95;
+  --line:#dde3e8;--accent:#0f6b5c;--accent-ink:#ffffff;--accent-soft:#e3f2ef;--warn:#9a5b00;--err:#b42318;--ok:#0f6b5c;
+  --radius:12px;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1418;--surface:#171e24;--surface-2:#1c252c;--ink:#e6edf2;--ink-2:#a9b6bf;--ink-3:#7d8b95;
+  --line:#2a353e;--accent:#3cb8a0;--accent-ink:#0b1a17;--accent-soft:#16312c;--warn:#e0a24a;--err:#f2867c;--ok:#5fd0b8;
+  --shadow:none;}}
+:root[data-theme="dark"]{--bg:#0f1418;--surface:#171e24;--surface-2:#1c252c;--ink:#e6edf2;--ink-2:#a9b6bf;--ink-3:#7d8b95;
+  --line:#2a353e;--accent:#3cb8a0;--accent-ink:#0b1a17;--accent-soft:#16312c;--warn:#e0a24a;--err:#f2867c;--ok:#5fd0b8;--shadow:none;}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+header.top{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--surface)}
+.logo{width:36px;height:36px;border-radius:9px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;font-size:17px;flex:none}
+.brand h1{font-size:17px;margin:0;line-height:1.2}
+.brand p{margin:0;color:var(--ink-3);font-size:13px}
+.top .spacer{flex:1}
+.top .note{font-size:12.5px;color:var(--ink-3);text-align:right}
+main{display:grid;grid-template-columns:minmax(300px,360px) 1fr;gap:16px;padding:16px 20px 28px;max-width:1600px;margin:0 auto}
+@media (max-width:900px){main{grid-template-columns:1fr;padding:12px 16px 24px}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.side{display:flex;flex-direction:column;gap:14px;align-self:start}
+.side .card{padding:14px 16px}
+.card h2{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);margin:0 0 10px;font-weight:600}
+label{display:block;font-size:13px;color:var(--ink-2);margin:10px 0 4px;font-weight:500}
+label:first-of-type{margin-top:0}
+input[type=text],input[type=number],textarea,select{width:100%;font:inherit;font-size:14px;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+input:focus,textarea:focus,select:focus,button:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+textarea.masked{-webkit-text-security:disc}
+.row{display:flex;gap:8px;align-items:center}
+.row > *{min-width:0}
+.row > input{flex:1}
+@media (max-width:640px){.top .note{display:none}}
+.hint{font-size:12px;color:var(--ink-3);margin-top:4px}
+.hint a{color:var(--accent)}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--ink-2);margin:8px 0 0;font-weight:400}
+.check input{margin-top:3px;accent-color:var(--accent)}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 12px;font-size:14px}
+button:hover{background:var(--surface-2)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600;width:100%;padding:11px 14px;font-size:15px}
+button.primary:hover{filter:brightness(1.06)}
+button:disabled{opacity:.55;cursor:not-allowed}
+button.link{border:0;background:none;color:var(--accent);padding:0;font-size:12.5px}
+button.small{padding:6px 10px;font-size:13px;white-space:nowrap}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:22px 12px;text-align:center;cursor:pointer;background:var(--surface-2);transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop strong{display:block;font-size:15px}
+.drop span{font-size:12.5px;color:var(--ink-3)}
+.drop svg{width:30px;height:30px;color:var(--accent);margin-bottom:6px}
+#fileList{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
+#fileList li{display:flex;gap:8px;align-items:center;font-size:13px}
+.ficon{font-size:10px;font-weight:700;background:var(--accent-soft);color:var(--accent);border-radius:4px;padding:1px 5px}
+.fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fsize{color:var(--ink-3);font-size:12px}
+.fclear{justify-content:flex-end}
+#progress{margin-top:10px;font-size:13px;color:var(--ink-2)}
+.bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:6px}
+.bar::after{content:"";display:block;height:100%;width:35%;background:var(--accent);animation:slide 1.2s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+@media (prefers-reduced-motion:reduce){.bar::after{animation:none;width:100%;opacity:.5}}
+#btnStop{margin-top:8px;width:100%}
+.results{display:flex;flex-direction:column;min-width:0}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:6px 12px;font-size:13px;background:var(--surface)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.stats{display:flex;gap:14px;font-size:12.5px;color:var(--ink-3);flex-wrap:wrap}
+.stats b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+.toolbar .spacer{flex:1}
+.export{display:flex;gap:8px;flex-wrap:wrap}
+.export .main{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.panes{display:grid;grid-template-columns:1fr 1fr;min-height:560px}
+body[data-view="edit"] .panes{grid-template-columns:1fr} body[data-view="edit"] .pane-prev{display:none}
+body[data-view="preview"] .panes{grid-template-columns:1fr} body[data-view="preview"] .pane-edit{display:none}
+@media (max-width:900px){.panes{grid-template-columns:1fr}}
+.pane{display:flex;flex-direction:column;min-width:0}
+.pane-edit{border-right:1px solid var(--line)}
+.pane-head{font-size:12px;color:var(--ink-3);padding:8px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+#editor{flex:1;border:0;border-radius:0;background:var(--surface);font:13px/1.6 var(--mono);padding:12px 14px;resize:none;min-height:520px}
+#preview{flex:1;padding:14px 22px;overflow:auto;max-height:78vh;font-family:"Times New Roman",Times,serif;font-size:16px;line-height:1.6}
+#preview p{margin:0 0 6px}
+#preview h2,#preview h3,#preview h4{font-family:var(--sans);margin:10px 0 6px}
+#preview .tab{display:inline-block;width:2.5em}
+#preview .dmath{text-align:center;margin:6px 0;overflow-x:auto}
+#preview math{font-size:1.05em}
+#preview figure{margin:8px 0;text-align:center}
+#preview figure img{max-width:min(100%,520px);border:1px solid var(--line);border-radius:6px;background:#fff}
+#preview figcaption{font:12px var(--sans);color:var(--ink-3)}
+#preview .tbl-wrap{overflow-x:auto;margin:6px 0}
+#preview table{border-collapse:collapse;margin:0 auto}
+#preview th,#preview td{border:1px solid var(--ink-3);padding:3px 10px;text-align:center}
+#preview .page-mark{font:11px var(--sans);color:var(--ink-3);border-top:1px dashed var(--line);margin:14px 0 8px;padding-top:4px}
+#preview .math-err{color:var(--err);font-family:var(--mono);font-size:13px}
+#preview .img-missing{border:1px dashed var(--warn);color:var(--warn);font:13px var(--sans);padding:10px;border-radius:6px;text-align:center;margin:6px 0}
+#preview .empty{color:var(--ink-3);font-family:var(--sans);font-size:14px;padding:40px 0;text-align:center}
+#gallery{border-top:1px solid var(--line);padding:12px 14px}
+.gal-title{font-size:12px;color:var(--ink-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em}
+.gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.gal-item{border:1px solid var(--line);border-radius:8px;padding:6px;text-align:center;background:var(--surface-2)}
+.gal-item img{max-width:100%;max-height:110px;background:#fff;border-radius:4px}
+.gal-meta{font-size:11.5px;color:var(--ink-3)}
+.logcard{margin-top:14px;padding:10px 14px}
+#log{max-height:170px;overflow:auto;font:12px/1.5 var(--mono);color:var(--ink-2)}
+.log-line.err{color:var(--err)} .log-line.warn{color:var(--warn)} .log-line.ok{color:var(--ok)}
+details summary{cursor:pointer;font-size:13px;color:var(--ink-2)}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;max-width:calc(100% - 32px)}
+#toast.show{opacity:1;transform:translateX(-50%)}
+footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
+</style>
+</head>
+<body data-view="split">
+<header class="top">
+  <div class="logo" aria-hidden="true">∑</div>
+  <div class="brand"><h1>MathDoc</h1><p>Chuyển đề Toán từ PDF/ảnh sang Word có công thức Equation</p></div>
+  <div class="spacer"></div>
+  <div class="note">File được gửi thẳng từ trình duyệt đến Gemini bằng key của bạn.<br>Không qua máy chủ trung gian.</div>
+</header>
+<main>
+  <aside class="side">
+    <section class="card">
+      <h2>1. Gemini API key</h2>
+      <label for="keys">API key (mỗi dòng một key, tự đổi khi hết lượt)</label>
+      <div style="position:relative">
+        <textarea id="keys" class="masked" rows="2" spellcheck="false" placeholder="AIza…"></textarea>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:4px">
+        <span class="hint">Lấy key miễn phí tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a></span>
+        <button type="button" class="link" id="toggleKey">Hiện</button>
+      </div>
+      <label class="check"><input type="checkbox" id="remember"> Ghi nhớ key trên máy này</label>
+      <label for="model">Model</label>
+      <div class="row">
+        <input type="text" id="model" list="modelList" spellcheck="false" placeholder="gemini-2.5-flash">
+        <button type="button" class="small" id="btnModels">Tải danh sách</button>
+      </div>
+      <datalist id="modelList"></datalist>
+      <div class="hint">Bản “flash” nhanh và rẻ; bản “pro” chính xác hơn với đề khó.</div>
+    </section>
+
+    <section class="card">
+      <h2>2. Tài liệu nguồn</h2>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Chọn file PDF hoặc ảnh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <strong>Kéo thả PDF hoặc ảnh vào đây</strong>
+        <span>hoặc bấm để chọn · dán ảnh bằng Ctrl+V<br>1 file PDF (≤ 19 MB) hoặc tối đa 30 ảnh</span>
+      </div>
+      <input type="file" id="fileInput" accept="application/pdf,image/png,image/jpeg,image/webp" multiple hidden>
+      <ul id="fileList"></ul>
+      <div class="row" style="margin-top:10px">
+        <div style="flex:1"><label for="maxPages">Số trang tối đa</label><input type="number" id="maxPages" min="1" max="60" value="20"></div>
+        <div style="flex:2"><label for="outName">Tên file xuất</label><input type="text" id="outName" placeholder="tai-lieu"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="cropFigures" checked> Tự cắt hình vẽ, đồ thị chèn vào Word</label>
+      <label class="check"><input type="checkbox" id="refImages" checked> Gửi kèm ảnh trang để định vị hình chính xác hơn (PDF)</label>
+      <label class="check"><input type="checkbox" id="relocate"> Định vị lại hình lần 2 (chính xác hơn, tốn thêm lượt gọi)</label>
+      <details style="margin-top:10px">
+        <summary>Yêu cầu bổ sung cho AI</summary>
+        <textarea id="customPrompt" rows="3" style="margin-top:6px" placeholder="Ví dụ: Bỏ phần đáp án cuối đề; giữ nguyên lời giải; đánh số lại câu hỏi…"></textarea>
+      </details>
+      <div style="margin-top:14px">
+        <button type="button" class="primary" id="btnRun">Bắt đầu chuyển đổi</button>
+        <button type="button" id="btnStop" hidden>Dừng</button>
+        <div id="progress" hidden><span id="progressLabel">Đang xử lý…</span><div class="bar"></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Định dạng Word</h2>
+      <div class="row">
+        <div style="flex:2"><label for="fontName">Phông chữ</label>
+          <select id="fontName"><option>Times New Roman</option><option>Arial</option><option>Calibri</option><option>Cambria</option></select></div>
+        <div style="flex:1"><label for="fontSize">Cỡ chữ</label>
+          <select id="fontSize"><option>11</option><option selected>12</option><option>13</option><option>14</option></select></div>
+      </div>
+      <label class="check"><input type="checkbox" id="pageBreaks"> Ngắt trang theo trang gốc</label>
+      <div class="hint">Công thức xuất dạng Word Equation. Cần MathType thì mở file Word, chọn MathType → Convert Equations.</div>
+    </section>
+  </aside>
+
+  <section class="results">
+    <div class="card">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Chế độ xem">
+          <button type="button" data-v="split" aria-pressed="true">Song song</button>
+          <button type="button" data-v="edit" aria-pressed="false">Chỉnh sửa</button>
+          <button type="button" data-v="preview" aria-pressed="false">Xem trước</button>
+        </div>
+        <div class="stats">
+          <span><b id="stPages">0</b> trang</span><span><b id="stMath">0</b> công thức</span><span><b id="stImg">0</b> hình</span><span><b id="stChars">0</b> ký tự</span>
+        </div>
+        <div class="spacer"></div>
+        <div class="export">
+          <button type="button" class="small" id="btnDemo">Nội dung mẫu</button>
+          <button type="button" class="small" id="btnCopy">Sao chép</button>
+          <button type="button" class="small" id="btnMd">Tải .md</button>
+          <button type="button" class="small main" id="btnWord">Xuất Word</button>
+        </div>
+      </div>
+      <div class="panes">
+        <div class="pane pane-edit">
+          <div class="pane-head"><span>Markdown + LaTeX (sửa trực tiếp được)</span><span>$…$ trong dòng · $$…$$ riêng dòng</span></div>
+          <textarea id="editor" spellcheck="false" placeholder="Kết quả OCR sẽ hiện ở đây. Bạn có thể sửa trước khi xuất Word."></textarea>
+        </div>
+        <div class="pane pane-prev">
+          <div class="pane-head"><span>Xem trước</span><span>Công thức hiển thị bằng MathML</span></div>
+          <div id="preview"></div>
+        </div>
+      </div>
+      <div id="gallery" hidden></div>
+    </div>
+    <div class="card logcard">
+      <details open><summary>Nhật ký xử lý</summary><div id="log"></div></details>
+    </div>
+  </section>
+</main>
+<footer>MathDoc · Tổ Toán – Trường THPT Phan Đăng Lưu</footer>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module">/*APP*/</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+e2e*.mjs
+dbg.mjs
+t.mjs
+test_docx.mjs
