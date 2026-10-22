@@ -20,3 +20,10 @@ node build.mjs      # tạo lại dist/index.html
 - `src/pages.js`  đọc PDF (pdf.js), cắt hình
 - `src/md.js`     phân tích Markdown
 - `src/docx.js`   dựng file Word: LaTeX → MathML (temml) → OMML (mathml2omml)
+
+## Khoá chung của tổ (tuỳ chọn)
+Trong Vercel → Project mathdoc → Settings → Environment Variables, thêm:
+- `GEMINI_API_KEY`: khoá Gemini của tổ (nhiều khoá thì ngăn cách bằng dấu phẩy, tự đổi khi hết lượt)
+- `MATHDOC_ACCESS_CODE`: mã truy cập phát cho giáo viên trong tổ
+Sau đó Redeploy. Thiếu một trong hai biến thì chế độ khoá chung tự khoá lại.
+Giới hạn của Vercel: mỗi lần gửi tối đa ~4,5 MB.

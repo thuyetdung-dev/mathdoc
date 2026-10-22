@@ -1,7 +1,7 @@
 import temml from 'temml';
 import { parseBlocks } from './md.js';
 import { buildDocx } from './docx.js';
-import { listModels, generate, relocate } from './gemini.js';
+import { listModels, generate, relocate, pickAuto, AUTO_CHAIN } from './gemini.js';
 import { openPdf, renderPdfPage, fileToDataUrl, imageFileToCanvas, canvasToJpeg, cropBox } from './pages.js';
 
 const $ = s => document.querySelector(s);
@@ -29,7 +29,7 @@ const PROMPT_IMG_EXTRA = `Các ảnh được gửi theo thứ tự trang (ảnh
 
 const state = {
   files: [], kind: null, pdfDoc: null, pageCanvases: new Map(),
-  images: new Map(), markdown: '', busy: false, abort: null, t0: 0,
+  images: new Map(), markdown: '', busy: false, abort: null, t0: 0, models: [],
 };
 
 // ---------------- UI helpers ----------------
@@ -49,8 +49,30 @@ function setBusy(b, label) {
   $('#progress').hidden = !b;
   if (label) $('#progressLabel').textContent = label;
 }
+function keyMode() { return document.querySelector('input[name="keyMode"]:checked').value; }
 function keys() {
-  return $('#keys').value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  return [$('#key1').value, ...$('#keysBackup').value.split(/[\s,;]+/)].map(x => x.trim()).filter(Boolean);
+}
+/** Connection for gemini.js, or null (with a toast) when nothing has been entered. */
+function connection() {
+  if (keyMode() === 'school') {
+    const code = $('#accessCode').value.trim();
+    if (!code) { toast('Nhập mã truy cập của tổ.'); return null; }
+    return { mode: 'school', code };
+  }
+  const ks = keys();
+  if (!ks.length) { toast('Hãy dán khoá API Gemini, hoặc chọn “Khoá chung của tổ”.'); return null; }
+  return { mode: 'personal', keys: ks };
+}
+/** Model ids to try: the chosen one, or an automatic chain. */
+function modelChain() {
+  const v = $('#modelSel').value;
+  if (v && v !== 'auto') return [v];
+  const best = state.models.length ? pickAuto(state.models) : null;
+  return [...new Set([best, ...AUTO_CHAIN].filter(Boolean))];
+}
+function setKeyStatus(stateName, text) {
+  const el = $('#keyStatus'); el.dataset.state = stateName; el.querySelector('.txt').textContent = text;
 }
 function download(blob, name) {
   const a = document.createElement('a');
@@ -62,32 +84,99 @@ const fmtSize = n => n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 10485
 
 // ---------------- settings ----------------
 function initSettings() {
-  $('#remember').checked = LS.get('remember', '1') === '1';
-  if ($('#remember').checked) $('#keys').value = LS.get('keys');
-  $('#model').value = LS.get('model', 'gemini-2.5-flash');
+  const mem = { get: k => { try { return sessionStorage.getItem('mathdoc_' + k) || ''; } catch { return ''; } },
+                set: (k, v) => { try { v ? sessionStorage.setItem('mathdoc_' + k, v) : sessionStorage.removeItem('mathdoc_' + k); } catch {} } };
+  $('#remember').checked = LS.get('remember', '0') === '1';
+  const src = $('#remember').checked ? LS.get : mem.get;
+  $('#key1').value = src('key1'); $('#keysBackup').value = src('keysBackup');
+  $('#accessCode').value = mem.get('code') || LS.get('code');
+  const mode = LS.get('keyMode', 'personal');
+  document.querySelector(`input[name="keyMode"][value="${mode}"]`).checked = true;
   $('#fontName').value = LS.get('font', 'Times New Roman');
   $('#fontSize').value = LS.get('fsize', '12');
-  const save = () => {
-    LS.set('remember', $('#remember').checked ? '1' : '0');
-    if ($('#remember').checked) LS.set('keys', $('#keys').value); else LS.del('keys');
-    LS.set('model', $('#model').value.trim());
-    LS.set('font', $('#fontName').value); LS.set('fsize', $('#fontSize').value);
+  const savedModel = LS.get('model', 'auto');
+  if (savedModel !== 'auto') $('#modelSel').insertAdjacentHTML('beforeend', `<option value="${savedModel}">${savedModel}</option>`);
+  $('#modelSel').value = savedModel;
+
+  const updateBackupCount = () => {
+    const n = $('#keysBackup').value.split(/[\s,;]+/).filter(Boolean).length;
+    $('#backupCount').textContent = n ? `(${n})` : '';
   };
-  ['#keys', '#remember', '#model', '#fontName', '#fontSize'].forEach(s => $(s).addEventListener('change', save));
-  $('#btnModels').addEventListener('click', async () => {
-    const k = keys()[0];
-    if (!k) return toast('Nhập API key trước.');
-    try {
-      const ms = await listModels(k);
-      $('#modelList').innerHTML = ms.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
-      log(`Tải được ${ms.length} model: ${ms.slice(0, 6).map(m => m.id).join(', ')}…`, 'ok');
-      toast(`Đã tải ${ms.length} model – bấm vào ô Model để chọn`);
-    } catch (e) { log('Không tải được danh sách model: ' + e.message, 'err'); toast('Key không hợp lệ hoặc lỗi mạng'); }
+  const save = () => {
+    const remember = $('#remember').checked;
+    LS.set('remember', remember ? '1' : '0');
+    for (const k of ['key1', 'keysBackup']) {
+      if (remember) { LS.set(k, $('#' + k).value); mem.set(k, ''); }
+      else { LS.del(k); mem.set(k, $('#' + k).value); }
+    }
+    mem.set('code', $('#accessCode').value);
+    LS.set('model', $('#modelSel').value);
+    LS.set('font', $('#fontName').value); LS.set('fsize', $('#fontSize').value);
+    updateBackupCount();
+  };
+  ['#key1', '#keysBackup', '#remember', '#accessCode', '#modelSel', '#fontName', '#fontSize'].forEach(sel => $(sel).addEventListener('change', save));
+  $('#key1').addEventListener('input', () => setKeyStatus('idle', 'Chưa kiểm tra kết nối — bấm “Dò”'));
+  updateBackupCount();
+
+  const applyMode = () => {
+    const m = keyMode();
+    $('#personalBox').hidden = m !== 'personal';
+    $('#schoolBox').hidden = m !== 'school';
+    $('#privacyNote').textContent = m === 'school'
+      ? 'Tài liệu được gửi qua máy chủ Vercel của tổ rồi tới Google. Máy chủ không lưu tài liệu.'
+      : 'Khoá chỉ giữ trong phiên làm việc này (trừ khi bật “Ghi nhớ”) và được gửi thẳng tới Google; không đi qua máy chủ nào khác.';
+    if (m === 'school') $('#refImages').checked = false;
+    LS.set('keyMode', m);
+    state.models = []; resetModelList();
+    setKeyStatus('idle', 'Chưa kiểm tra kết nối — bấm “Dò”');
+  };
+  document.querySelectorAll('input[name="keyMode"]').forEach(r => r.addEventListener('change', applyMode));
+  applyMode();
+
+  const toggle = (inp, btn, what) => () => {
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    btn.textContent = show ? 'Ẩn' : 'Hiện';
+    btn.setAttribute('aria-label', `${show ? 'Ẩn' : 'Hiện'} ${what}`);
+  };
+  $('#showKey1').addEventListener('click', toggle($('#key1'), $('#showKey1'), 'khoá API'));
+  $('#showCode').addEventListener('click', toggle($('#accessCode'), $('#showCode'), 'mã truy cập'));
+  $('#clearKey1').addEventListener('click', () => {
+    $('#key1').value = ''; $('#key1').type = 'password'; $('#showKey1').textContent = 'Hiện';
+    save(); state.models = []; resetModelList();
+    setKeyStatus('idle', 'Đã xoá khoá khỏi phiên này');
+    toast('Đã xoá khoá Gemini khỏi phiên này');
   });
-  $('#toggleKey').addEventListener('click', () => {
-    const t = $('#keys'); t.classList.toggle('masked');
-    $('#toggleKey').textContent = t.classList.contains('masked') ? 'Hiện' : 'Ẩn';
-  });
+  $('#btnScan').addEventListener('click', scanModels);
+}
+
+function resetModelList() {
+  const keep = $('#modelSel').value;
+  $('#modelSel').innerHTML = '<option value="auto">Tự động chọn mô hình</option>' +
+    state.models.map(m => `<option value="${m.id}">${m.label}${m.label !== m.id ? ' · ' + m.id : ''}</option>`).join('');
+  $('#modelSel').value = [...$('#modelSel').options].some(o => o.value === keep) ? keep : 'auto';
+}
+
+async function scanModels() {
+  const conn = connection();
+  if (!conn) return;
+  setKeyStatus('busy', 'Đang kiểm tra…');
+  $('#btnScan').disabled = true;
+  try {
+    state.models = await listModels(conn);
+    resetModelList();
+    const auto = pickAuto(state.models);
+    setKeyStatus('ok', `Đã kết nối ${state.models.length} mô hình · tự động dùng ${auto || '—'}`);
+    log(`Kết nối thành công (${conn.mode === 'school' ? 'khoá chung' : 'khoá cá nhân'}): ${state.models.length} mô hình.`, 'ok');
+  } catch (e) {
+    state.models = []; resetModelList();
+    const msg = /401|UNAUTHENTICATED/.test(e.message) ? 'Mã truy cập không đúng'
+      : /API key|API_KEY|400|403/.test(e.message) ? 'Khoá không hợp lệ hoặc chưa bật Gemini API'
+      : /NOT_CONFIGURED|503/.test(e.message) ? 'Máy chủ chưa cấu hình khoá chung'
+      : 'Không kết nối được';
+    setKeyStatus('err', msg);
+    log('Kiểm tra kết nối lỗi: ' + e.message, 'err');
+  } finally { $('#btnScan').disabled = false; }
 }
 
 // ---------------- file input ----------------
@@ -142,10 +231,11 @@ async function getPageCanvas(n) {
 
 // ---------------- main pipeline ----------------
 async function run() {
-  const ks = keys();
-  if (!ks.length) return toast('Chưa nhập Gemini API key.');
   if (!state.files.length) return toast('Chưa chọn file PDF hoặc ảnh.');
-  const model = $('#model').value.trim() || 'gemini-2.5-flash';
+  const conn = connection();
+  if (!conn) return;
+  const chain = modelChain();
+  let model = chain[0];
   const maxPages = Math.max(1, +$('#maxPages').value || 30);
   state.images.clear(); state.markdown = '';
   state.abort = new AbortController();
@@ -184,11 +274,12 @@ async function run() {
     parts.push({ text: [PROMPT_PDF, state.kind === 'img' ? PROMPT_IMG_EXTRA : '', `Chỉ OCR ${nPages} trang đầu.`, extra ? `YÊU CẦU BỔ SUNG CỦA GIÁO VIÊN:\n${extra}` : ''].filter(Boolean).join('\n\n') });
     const approx = JSON.stringify(parts).length;
     if (approx > 19.5 * 1048576) throw new Error('Dữ liệu gửi đi vượt ~20 MB. Hãy giảm số trang hoặc bỏ chọn “Gửi kèm ảnh tham chiếu”.');
+    if (conn.mode === 'school' && approx > 4.2 * 1048576) throw new Error(`Dữ liệu ${fmtSize(approx)} vượt giới hạn ~4 MB của khoá chung. Hãy giảm số trang, bỏ “Gửi kèm ảnh tham chiếu”, hoặc dùng khoá cá nhân.`);
 
-    setBusy(true, `Gemini (${model}) đang đọc tài liệu…`);
+    setBusy(true, `Gemini (${model}${chain.length > 1 ? ', tự động' : ''}) đang đọc tài liệu…`);
     let lastPaint = 0;
     const res = await generate({
-      keys: ks, model, parts, signal: state.abort.signal,
+      conn, models: chain, parts, signal: state.abort.signal,
       onLog: m => log(m, 'warn'),
       onText: t => {
         const now = performance.now();
@@ -196,10 +287,11 @@ async function run() {
       },
     });
     let md = res.text.replace(/^```(?:markdown|md)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-    log(`Gemini trả về ${md.length.toLocaleString('vi-VN')} ký tự (key #${res.keyIndex + 1}, finishReason ${res.finishReason || '—'}).`, 'ok');
+    model = res.model;
+    log(`Gemini (${res.model}) trả về ${md.length.toLocaleString('vi-VN')} ký tự (${conn.mode === 'school' ? 'khoá chung' : 'khoá #' + (res.keyIndex + 1)}, finishReason ${res.finishReason || '—'}).`, 'ok');
     if (res.finishReason === 'MAX_TOKENS') log('Kết quả bị cắt do vượt giới hạn độ dài. Hãy giảm số trang mỗi lần.', 'err');
 
-    md = await processFigures(md, ks, model);
+    md = await processFigures(md, conn, model);
     state.markdown = md;
     $('#editor').value = md;
     renderPreview(); updateStats();
@@ -214,7 +306,7 @@ async function run() {
 
 const FIG_RE = /\[\[\s*(?:HINH|HÌNH|IMAGE)\s*:\s*(\d+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:\|([^\]]*))?\]\]/gi;
 
-async function processFigures(md, ks, model) {
+async function processFigures(md, conn, model) {
   const figs = [];
   md.replace(FIG_RE, (all, p, a, b, c, d, alt) => { figs.push({ all, page: +p, box: [+a, +b, +c, +d], alt: (alt || '').trim() }); return all; });
   if (!figs.length) return md;
@@ -234,7 +326,7 @@ async function processFigures(md, ks, model) {
     if (!c) { log(`Không có trang ${page} để cắt hình.`, 'warn'); continue; }
     if ($('#relocate').checked) {
       try {
-        const fixed = await relocate({ keys: ks, model, pageDataUrl: canvasToJpeg(c, 1600, 0.85), figures: list.map(f => ({ id: f.id, alt: f.alt, box: f.box })), signal: state.abort.signal });
+        const fixed = await relocate({ conn, model, pageDataUrl: canvasToJpeg(c, 1600, 0.85), figures: list.map(f => ({ id: f.id, alt: f.alt, box: f.box })), signal: state.abort.signal });
         for (const r of fixed) { const f = list.find(x => x.id === r.id); if (f) f.box = r.box; }
         if (fixed.length) log(`Định vị lại ${fixed.length} hình ở trang ${page}.`);
       } catch (e) { if (e.name === 'AbortError') throw e; log(`Định vị lại trang ${page} lỗi, dùng toạ độ ban đầu: ${e.message}`, 'warn'); }
