@@ -144,7 +144,7 @@ export async function relocate({ conn, model, pageDataUrl, figures, signal }) {
   const prompt = `Đây là ảnh MỘT trang tài liệu. Hãy xác định hộp bao chính xác của từng hình vẽ/biểu đồ/bảng biến thiên được mô tả dưới đây.
 Trả về DUY NHẤT một mảng JSON dạng [{"id":1,"box_2d":[ymin,xmin,ymax,xmax]}], toạ độ là số nguyên thang 0..1000 trên toàn trang. Hộp phải bao trọn hình (cả nhãn, chú thích chữ trong hình) nhưng không lấn sang đoạn văn bản xung quanh.
 Danh sách hình:
-${figures.map(f => `- id ${f.id}: ${f.alt || 'hình'} (vị trí gợi ý ${f.box.join(',')})`).join('\n')}`;
+${figures.map(f => `- id ${f.id}: ${f.alt || 'hình'} (${f.box.every(v => !v) ? `chưa rõ vị trí, hãy tự tìm trên trang${f.hint ? `; nội dung: ${f.hint}` : ''}` : `vị trí gợi ý ${f.box.join(',')}`})`).join('\n')}`;
   const { text } = await generate({
     conn, models: [model], signal,
     parts: [{ inline_data: { mime_type: 'image/jpeg', data: pageDataUrl.split(',')[1] } }, { text: prompt }],
