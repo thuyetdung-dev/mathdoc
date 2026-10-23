@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import temml from 'temml';
 import { mml2omml } from 'mathml2omml';
 import { parseBlocks } from './md.js';
+import { autoFence, prepMathml, fixOmml } from './mathfix.js';
 
 const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
   'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
@@ -26,7 +27,7 @@ function wellFormed(xml) {
 }
 
 export function texToOmml(tex) {
-  const mml = temml.renderToString(tex, { xml: true, throwOnError: true, displayMode: false });
+  const mml = prepMathml(temml.renderToString(autoFence(tex), { xml: true, throwOnError: true, displayMode: false }));
   let o = mml2omml(mml);
   o = o.replace(/ xmlns:m="[^"]*"/g, '').replace(/ xmlns:w="[^"]*"/g, '')
     .replace(/<m:argPr><m:scrLvl m:val="0"\/><\/m:argPr>/g, '')
@@ -40,6 +41,7 @@ export function texToOmml(tex) {
     .replace(/<m:(\w+) m:val="(undefined|null|NaN|)"\/>/g, '')
     .replace(/<m:chr m:val="([^"]*)" m:pos="([^"]*)"\/>/g, '<m:chr m:val="$1"/><m:pos m:val="$2"/>')   // pos is an element, not an attribute
     .replace(/<m:rPr>([\s\S]*?)<\/m:rPr>/g, (all, inner) => /<m:nor\/>/.test(inner) ? `<m:rPr>${inner.replace(/<m:sty [^>]*\/>|<m:scr [^>]*\/>/g, '')}</m:rPr>` : all);
+  o = fixOmml(o);
   if (!wellFormed(o)) throw new Error('OMML không hợp lệ');
   return o;
 }
@@ -64,10 +66,51 @@ function inlineXml(tokens, stats, opts = {}) {
   return x;
 }
 
-function pXml(inner, { align, spacingAfter = 60, keepNext, pageBreakBefore } = {}) {
-  const ppr = (pageBreakBefore ? '<w:pageBreakBefore/>' : '') + (keepNext ? '<w:keepNext/>' : '') +
+function pXml(inner, { align, spacingAfter = 60, keepNext, pageBreakBefore, tabs } = {}) {
+  // thứ tự phần tử trong w:pPr phải đúng chuẩn: keepNext → pageBreakBefore → tabs → spacing → jc
+  const ppr = (keepNext ? '<w:keepNext/>' : '') + (pageBreakBefore ? '<w:pageBreakBefore/>' : '') +
+    (tabs && tabs.length ? `<w:tabs>${tabs.map(t => `<w:tab w:val="left" w:pos="${Math.round(t)}"/>`).join('')}</w:tabs>` : '') +
     `<w:spacing w:after="${spacingAfter}" w:line="276" w:lineRule="auto"/>` + (align ? `<w:jc w:val="${align}"/>` : '');
   return `<w:p><w:pPr>${ppr}</w:pPr>${inner}</w:p>`;
+}
+
+// ---- phương án A. B. C. D. ngăn cách bằng TAB: tự dàn 4 / 2 / 1 phương án mỗi dòng ----
+const OPTION_RE = /^\s*(?:[A-D]\.|[a-d]\))/;
+const TAB_RUN = '<w:r><w:tab/></w:r>';
+
+function splitTabs(inl) {
+  const segs = [[]];
+  for (const tk of inl) {
+    if (tk.t !== 'text' || !tk.s.includes('\t')) { segs[segs.length - 1].push(tk); continue; }
+    tk.s.split('\t').forEach((part, i) => {
+      if (i) segs.push([]);
+      if (part) segs[segs.length - 1].push({ ...tk, s: part });
+    });
+  }
+  return segs.filter(sg => sg.some(t => t.t !== 'text' || t.s.trim()));
+}
+
+/** Số ký tự hiển thị (ước lượng) của một công thức LaTeX. */
+function mathChars(tex) {
+  let s = tex;
+  for (let k = 0; k < 4; k++) s = s.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a, b) => (a.length >= b.length ? a : b));
+  s = s.replace(/\\(?:left|right|displaystyle|limits|mathrm|text|operatorname|,|;|!)/g, '')
+    .replace(/\\[a-zA-Z]+/g, 'x').replace(/[{}^_\s]/g, '');
+  return s.length;
+}
+const segChars = seg => seg.reduce((n, t) => n + (t.t === 'text' ? t.s.trim().length + 1 : mathChars(t.tex)), 0);
+
+function tabbedXml(segs, stats, fontPt) {
+  const isOption = segs.length > 1 && segs.every(sg => sg[0] && sg[0].t === 'text' && OPTION_RE.test(sg[0].s));
+  const line = (group, per) => pXml(group.map(sg => inlineXml(sg, stats)).join(TAB_RUN),
+    { tabs: Array.from({ length: per - 1 }, (_, j) => (j + 1) * CONTENT_W_TW / per) });
+  if (!isOption) return line(segs, 4);
+  const n = segs.length;
+  const widest = Math.max(...segs.map(segChars)) * fontPt * 9 + 150;       // twip, ~0,45 em mỗi ký tự
+  const per = [Math.min(n, 4), 2, 1].find(k => k <= n && widest <= CONTENT_W_TW / k) || 1;
+  let x = '';
+  for (let k = 0; k < n; k += per) x += line(segs.slice(k, k + per), per);
+  return x;
 }
 
 function imageXml(rid, idn, cx, cy, name) {
@@ -114,7 +157,11 @@ export async function buildDocx(markdown, images, opts = {}) {
       body += `<w:p><w:pPr><w:pStyle w:val="Heading${Math.min(b.level, 3)}"/></w:pPr>${inlineXml(b.inl, stats)}</w:p>`;
       continue;
     }
-    if (b.type === 'para') { body += pXml(inlineXml(b.inl, stats)); continue; }
+    if (b.type === 'para') {
+      const segs = splitTabs(b.inl);
+      body += segs.length > 1 ? tabbedXml(segs, stats, fontSize / 2) : pXml(inlineXml(b.inl, stats));
+      continue;
+    }
     if (b.type === 'math') {
       let inner;
       try { inner = `<m:oMathPara>${texToOmml(b.tex)}</m:oMathPara>`; stats.formulas++; }

@@ -1,6 +1,7 @@
 // Load PDF/images into page canvases; crop figures.
 import * as pdfjsLib from 'pdfjs-dist';
 import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs';
+import { figureBounds } from './trim.js';
 
 let workerReady = false;
 function ensureWorker() {
@@ -77,24 +78,23 @@ export function cropBox(page, box, pad = 0.015) {
   const W = page.width, H = page.height;
   let sx = Math.round(x0 * W), sy = Math.round(y0 * H), sw = Math.round((x1 - x0) * W), sh = Math.round((y1 - y0) * H);
   if (sw < 16 || sh < 16) return null;
-  // trim white margins
+  // bỏ lề trắng và những dòng chữ của đề dính vào mép vùng cắt
   const ctx = page.getContext('2d', { willReadFrequently: true });
   const d = ctx.getImageData(sx, sy, sw, sh).data;
-  let minX = sw, minY = sh, maxX = -1, maxY = -1, ink = 0;
-  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
-    const o = (y * sw + x) * 4;
-    if (d[o] * 0.2126 + d[o + 1] * 0.7152 + d[o + 2] * 0.0722 < 235) {
-      ink++; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
-    }
-  }
-  if (maxX < 0 || ink / (sw * sh) < 0.0007) return null;
+  let ink = 0;
+  for (let o = 0; o < d.length; o += 4) if (d[o] * 0.2126 + d[o + 1] * 0.7152 + d[o + 2] * 0.0722 < 235) ink++;
+  if (ink / (sw * sh) < 0.0007) return null;
+  const fb = figureBounds(d, sw, sh, W);
+  if (!fb) return null;
+  const minX = fb.x0, minY = fb.y0, maxX = fb.x1, maxY = fb.y1;
+  // chừa lề trắng bằng cách vẽ hình lên nền trắng (không lấy lại phần trang quanh hình, tránh dính lại chữ thừa)
   const m = Math.round(Math.max(W, H) * 0.006);
-  const tx = Math.max(0, minX - m), ty = Math.max(0, minY - m);
-  const tw = Math.min(sw - tx, maxX - minX + 1 + 2 * m), th = Math.min(sh - ty, maxY - minY + 1 + 2 * m);
+  const iw = maxX - minX + 1, ih = maxY - minY + 1;
+  const tw = iw + 2 * m, th = ih + 2 * m;
   const out = document.createElement('canvas');
   out.width = tw; out.height = th;
   const octx = out.getContext('2d', { alpha: false });
   octx.fillStyle = '#fff'; octx.fillRect(0, 0, tw, th);
-  octx.drawImage(page, sx + tx, sy + ty, tw, th, 0, 0, tw, th);
+  octx.drawImage(page, sx + minX, sy + minY, iw, ih, m, m, iw, ih);
   return { dataUrl: out.toDataURL('image/png'), w: tw, h: th, frac: tw / W };
 }
