@@ -3,6 +3,7 @@ import { parseBlocks } from './md.js';
 import { buildDocx } from './docx.js';
 import { listModels, generate, relocate, pickAuto, fallbackChain } from './gemini.js';
 import { initKeyCheck } from './keycheck-ui.js';
+import { tablesToFigures } from './bbt.js';
 import { openPdf, renderPdfPage, fileToDataUrl, imageFileToCanvas, canvasToJpeg, cropBox } from './pages.js';
 
 const $ = s => document.querySelector(s);
@@ -19,12 +20,13 @@ QUY TẮC BẮT BUỘC
 2. Chép NGUYÊN VĂN: tiêu đề, đoạn văn, số câu, phương án A. B. C. D., ý a) b) c) d). Không giải bài, không sửa đề, không thêm lời bình. Giữ đúng chính tả tiếng Việt.
 3. Mỗi phương án/ý nằm trên một dòng riêng nếu trong đề chúng xuống dòng; nếu nhiều phương án trên cùng một dòng thì ngăn cách bằng ký tự TAB.
 4. Mọi biểu thức toán (kể cả số đơn lẻ có dấu, toạ độ, vectơ, đơn vị kèm số mũ) viết bằng LaTeX: trong dòng dùng $...$, công thức đứng riêng dòng dùng $$...$$. Dùng \\dfrac cho phân số lớn, \\overrightarrow{AB} cho vectơ, \\widehat{ABC} cho góc, \\begin{cases}...\\end{cases} cho hệ, \\left[\\begin{array}{l}...\\end{array}\\right. cho tuyển. Không dùng \\( \\) hay \\[ \\].
-5. Bảng (kể cả bảng số liệu, bảng biến thiên đơn giản dạng lưới) viết bằng bảng Markdown có dấu |, giữ đủ hàng, cột, ô trống; nội dung xuống dòng trong ô dùng <br>. Không dùng HTML table.
-6. Hình vẽ, đồ thị, biểu đồ, bảng biến thiên có mũi tên, sơ đồ: đặt trên MỘT DÒNG RIÊNG đúng vị trí của nó trong đề:
+5. Bảng số liệu, bảng tần số, bảng phân bố xác suất… viết bằng bảng Markdown có dấu |, giữ đủ hàng, cột, ô trống; nội dung xuống dòng trong ô dùng <br>. Không dùng HTML table. RIÊNG bảng biến thiên và bảng xét dấu (hàng x, f'(x) hoặc y', f(x) hoặc y, có mũi tên): TUYỆT ĐỐI KHÔNG chép thành bảng Markdown, phải đánh dấu là hình theo quy tắc 6 để cắt ảnh.
+6. Hình vẽ, đồ thị, biểu đồ, bảng biến thiên, bảng xét dấu, sơ đồ: đặt trên MỘT DÒNG RIÊNG đúng vị trí của nó trong đề:
    [[HINH:trang,ymin,xmin,ymax,xmax|mô tả ngắn]]
    trong đó toạ độ là số nguyên thang 0..1000 tính trên TOÀN trang (góc trên-trái (0,0), góc dưới-phải (1000,1000)), thứ tự y trước x. Hộp phải bao trọn hình và nhãn trong hình, nhưng KHÔNG lấn sang dòng chữ của đề ở phía trên, dưới hay bên cạnh hình. Không đánh dấu logo, chữ ký, watermark, số trang, khung trang trí.
-7. In đậm bằng **...** cho những chữ in đậm trong đề (ví dụ **Câu 1.**, **PHẦN I.**).
-8. OCR đủ mọi trang được yêu cầu, không bỏ trang, không viết "..." thay cho nội dung. Không bọc kết quả trong \`\`\`. Chỉ trả về Markdown.`;
+7. BỎ phần đầu trang/chân trang lặp lại ở mỗi trang (ví dụ "Mã đề 357 – Trang 1", "Trang 2/4", số trang, tên trường lặp lại ở đầu trang sau). Chỉ chép phần tiêu đề đề thi ở đầu trang 1.
+8. In đậm bằng **...** cho những chữ in đậm trong đề (ví dụ **Câu 1.**, **PHẦN I.**).
+9. OCR đủ mọi trang được yêu cầu, không bỏ trang, không viết "..." thay cho nội dung. Không bọc kết quả trong \`\`\`. Chỉ trả về Markdown.`;
 
 const PROMPT_IMG_EXTRA = `Các ảnh được gửi theo thứ tự trang (ảnh thứ k là trang k). Toạ độ hình tính trên chính ảnh trang đó.`;
 
@@ -299,6 +301,8 @@ async function run() {
     log(`Gemini (${res.model}) trả về ${md.length.toLocaleString('vi-VN')} ký tự (${conn.mode === 'school' ? 'khoá chung' : 'khoá #' + (res.keyIndex + 1)}, finishReason ${res.finishReason || '—'}).`, 'ok');
     if (res.finishReason === 'MAX_TOKENS') log('Kết quả bị cắt do vượt giới hạn độ dài. Hãy giảm số trang mỗi lần.', 'err');
 
+    // chân trang/đầu trang lặp lại ("Mã đề 357 – Trang 1", "Trang 2/4") lọt vào nội dung → bỏ
+    md = md.split('\n').filter(l => !/^\s*[*_]*\s*(?:Mã đề\s*:?\s*\w+\s*[-–—|]\s*)?Trang\s*\d+(?:\s*\/\s*\d+)?\s*[*_]*\s*$/i.test(l)).join('\n');
     md = await processFigures(md, conn, model);
     state.markdown = md;
     $('#editor').value = md;
@@ -315,15 +319,25 @@ async function run() {
 const FIG_RE = /\[\[\s*(?:HINH|HÌNH|IMAGE)\s*:\s*(\d+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:\|([^\]]*))?\]\]/gi;
 
 async function processFigures(md, conn, model) {
+  const cropOn = $('#cropFigures').checked;
+  // bảng biến thiên/xét dấu mà Gemini lỡ chép thành bảng chữ → chuyển thành hình để cắt ảnh
+  let fallbacks = [];
+  if (cropOn) {
+    const r = tablesToFigures(md);
+    if (r.fallbacks.length) log(`Phát hiện ${r.fallbacks.length} bảng biến thiên/xét dấu dạng chữ – sẽ cắt ảnh từ trang gốc.`);
+    md = r.md; fallbacks = r.fallbacks;
+  }
   const figs = [];
   md.replace(FIG_RE, (all, p, a, b, c, d, alt) => { figs.push({ all, page: +p, box: [+a, +b, +c, +d], alt: (alt || '').trim() }); return all; });
   if (!figs.length) return md;
-  if (!$('#cropFigures').checked) {
+  if (!cropOn) {
     return md.replace(FIG_RE, (all, p, a, b, c, d, alt) => `*[Hình: ${(alt || 'hình vẽ').trim()}]*`);
   }
   figs.forEach((f, i) => { f.id = i + 1; });
+  const unknown = f => f.box.every(v => !v);
+  for (const f of figs) if (unknown(f)) { const fb = fallbacks.shift(); if (fb) { f.fallback = fb.text; f.hint = fb.hint; } }
   // normalise if the model used 0..100 scale
-  for (const f of figs) if (f.box.every(v => v <= 100)) f.box = f.box.map(v => v * 10);
+  for (const f of figs) if (!unknown(f) && f.box.every(v => v <= 100)) f.box = f.box.map(v => v * 10);
   const byPage = new Map();
   figs.forEach(f => { if (!byPage.has(f.page)) byPage.set(f.page, []); byPage.get(f.page).push(f); });
   let k = 0;
@@ -332,21 +346,26 @@ async function processFigures(md, conn, model) {
     setBusy(true, `Đang cắt hình trang ${page} (${k}/${byPage.size})…`);
     const c = await getPageCanvas(page);
     if (!c) { log(`Không có trang ${page} để cắt hình.`, 'warn'); continue; }
-    if ($('#relocate').checked) {
+    if ($('#relocate').checked || list.some(unknown)) {
       try {
-        const fixed = await relocate({ conn, model, pageDataUrl: canvasToJpeg(c, 1600, 0.85), figures: list.map(f => ({ id: f.id, alt: f.alt, box: f.box })), signal: state.abort.signal });
-        for (const r of fixed) { const f = list.find(x => x.id === r.id); if (f) f.box = r.box; }
+        const fixed = await relocate({ conn, model, pageDataUrl: canvasToJpeg(c, 1600, 0.85), figures: list.map(f => ({ id: f.id, alt: f.alt, box: f.box, hint: f.hint })), signal: state.abort.signal });
+        for (const r of fixed) { const f = list.find(x => x.id === r.id); if (f && !r.box.every(v => !v)) f.box = r.box; }
         if (fixed.length) log(`Định vị lại ${fixed.length} hình ở trang ${page}.`);
       } catch (e) { if (e.name === 'AbortError') throw e; log(`Định vị lại trang ${page} lỗi, dùng toạ độ ban đầu: ${e.message}`, 'warn'); }
     }
     for (const f of list) {
+      if (unknown(f)) { log(`Không tìm được vị trí ${f.alt} (trang ${page}) – giữ dạng bảng chữ.`, 'warn'); continue; }
       const img = cropBox(c, f.box);
       if (img) state.images.set(f.id, { ...img, alt: f.alt, page });
-      else log(`Hình #${f.id} (trang ${page}) cắt ra vùng trống – giữ chỗ trống để bạn chèn tay.`, 'warn');
+      else log(`Hình #${f.id} (trang ${page}) cắt ra vùng trống – ${f.fallback ? 'giữ dạng bảng chữ' : 'giữ chỗ trống để bạn chèn tay'}.`, 'warn');
     }
   }
   let i = 0;
-  return md.replace(FIG_RE, (all, p, a, b, c, d, alt) => { i++; return `![${(alt || 'Hình').trim().replace(/[\[\]]/g, '')}](img:${i})`; });
+  return md.replace(FIG_RE, (all, p, a, b, c, d, alt) => {
+    const f = figs[i++];
+    if (f.fallback && !state.images.has(f.id)) return f.fallback;
+    return `![${(alt || 'Hình').trim().replace(/[\[\]]/g, '')}](img:${f.id})`;
+  });
 }
 
 // ---------------- preview ----------------
