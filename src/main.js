@@ -4,7 +4,7 @@ import { buildDocx } from './docx.js';
 import { listModels, generate, relocate, pickAuto, fallbackChain } from './gemini.js';
 import { initKeyCheck } from './keycheck-ui.js';
 import { tablesToFigures } from './bbt.js';
-import { stripSolutions, solvePrompt, parseSolution, composeEnd, composeInline } from './solve.js';
+import { stripSolutions, solvePrompt, parseSolution, composeEnd, composeInline, splitExamAnswer } from './solve.js';
 import { openPdf, renderPdfPage, fileToDataUrl, imageFileToCanvas, canvasToJpeg, cropBox } from './pages.js';
 
 const $ = s => document.querySelector(s);
@@ -506,17 +506,26 @@ function updateStats() {
 async function exportWord() {
   const md = $('#editor').value;
   if (!md.trim()) return toast('Chưa có nội dung để xuất.');
+  const base = $('#outName').value.trim() || 'tai-lieu';
+  const opts = { fontName: $('#fontName').value, fontSize: +$('#fontSize').value || 12, pageBreaks: $('#pageBreaks').checked };
+  // có lời giải và đang bật "tách riêng" → 2 file: đề sạch + đáp án
+  const { exam, answer } = splitExamAnswer(md);
+  const files = answer && $('#splitAnswer').checked
+    ? [{ md: exam, name: base + '.docx', label: 'Đề' }, { md: answer, name: base + '-dap-an.docx', label: 'Đáp án' }]
+    : [{ md, name: base + '.docx', label: '' }];
   try {
-    const { blob, stats } = await buildDocx(md, state.images, {
-      fontName: $('#fontName').value, fontSize: +$('#fontSize').value || 12,
-      pageBreaks: $('#pageBreaks').checked,   // không tự in đậm hàng đầu bảng: chữ đậm lấy theo **…** trong đề
-    });
-    download(blob, ($('#outName').value.trim() || 'tai-lieu') + '.docx');
-    log(`Đã xuất Word: ${stats.formulas} công thức, ${stats.images} hình, ${stats.tables} bảng.`, 'ok');
-    if (stats.mathErrors.length) {
-      log(`${stats.mathErrors.length} công thức lỗi cú pháp được giữ nguyên dạng chữ đỏ: ${stats.mathErrors.slice(0, 5).map(t => '$' + t + '$').join('  ')}`, 'warn');
-      toast(`Đã xuất – có ${stats.mathErrors.length} công thức cần sửa tay (chữ đỏ)`);
-    } else toast('Đã tải file Word');
+    let errors = [];
+    for (const [i, f] of files.entries()) {
+      const { blob, stats } = await buildDocx(f.md, state.images, opts);
+      if (i) await new Promise(r => setTimeout(r, 600));          // trình duyệt dễ chặn 2 lượt tải liền nhau
+      download(blob, f.name);
+      log(`Đã xuất Word${f.label ? ' (' + f.label + ')' : ''} – ${f.name}: ${stats.formulas} công thức, ${stats.images} hình, ${stats.tables} bảng.`, 'ok');
+      errors = errors.concat(stats.mathErrors);
+    }
+    if (errors.length) {
+      log(`${errors.length} công thức lỗi cú pháp được giữ nguyên dạng chữ đỏ: ${errors.slice(0, 5).map(t => '$' + t + '$').join('  ')}`, 'warn');
+      toast(`Đã xuất – có ${errors.length} công thức cần sửa tay (chữ đỏ)`);
+    } else toast(files.length > 1 ? 'Đã tải 2 file: đề và đáp án' : 'Đã tải file Word');
   } catch (e) { log('Xuất Word lỗi: ' + e.message, 'err'); }
 }
 
@@ -533,6 +542,8 @@ function init() {
   $('#btnStop').addEventListener('click', () => state.abort?.abort());
   $('#btnWord').addEventListener('click', exportWord);
   $('#btnSolve').addEventListener('click', solveExam);
+  $('#splitAnswer').checked = LS.get('splitAnswer', '1') === '1';
+  $('#splitAnswer').addEventListener('change', () => LS.set('splitAnswer', $('#splitAnswer').checked ? '1' : '0'));
   for (const id of ['solveLayout', 'solveDetail']) { $('#' + id).value = LS.get(id, $('#' + id).value); $('#' + id).addEventListener('change', () => LS.set(id, $('#' + id).value)); }
   $('#btnMd').addEventListener('click', () => download(new Blob([$('#editor').value], { type: 'text/markdown' }), ($('#outName').value.trim() || 'tai-lieu') + '.md'));
   $('#btnCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#editor').value); toast('Đã sao chép Markdown'); } catch { toast('Trình duyệt chặn sao chép'); } });
