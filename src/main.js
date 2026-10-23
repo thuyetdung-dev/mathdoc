@@ -4,6 +4,7 @@ import { buildDocx } from './docx.js';
 import { listModels, generate, relocate, pickAuto, fallbackChain } from './gemini.js';
 import { initKeyCheck } from './keycheck-ui.js';
 import { tablesToFigures } from './bbt.js';
+import { stripSolutions, solvePrompt, parseSolution, composeEnd, composeInline } from './solve.js';
 import { openPdf, renderPdfPage, fileToDataUrl, imageFileToCanvas, canvasToJpeg, cropBox } from './pages.js';
 
 const $ = s => document.querySelector(s);
@@ -48,7 +49,7 @@ function toast(msg) {
 }
 function setBusy(b, label) {
   state.busy = b;
-  $('#btnRun').disabled = b; $('#btnStop').hidden = !b;
+  $('#btnRun').disabled = b; $('#btnSolve').disabled = b; $('#btnStop').hidden = !b;
   $('#progress').hidden = !b;
   if (label) $('#progressLabel').textContent = label;
 }
@@ -368,6 +369,79 @@ async function processFigures(md, conn, model) {
   });
 }
 
+// ---------------- giải đề ----------------
+/** File gốc gửi kèm để AI xem hình (PDF nguyên file, hoặc ảnh các trang). */
+async function sourcePartsForSolve(conn) {
+  if (!state.files.length || !$('#solveSendFile').checked) return [];
+  const parts = [];
+  if (state.kind === 'pdf') {
+    const f = state.files[0];
+    const limit = conn.mode === 'school' ? 3 * 1048576 : 18 * 1048576;
+    if (f.size * 1.37 > limit) { log(`File gốc ${fmtSize(f.size)} quá lớn để gửi kèm khi giải – chỉ gửi nội dung chữ.`, 'warn'); return []; }
+    parts.push({ text: 'File đề gốc (để xem hình vẽ, bảng biến thiên):' });
+    parts.push({ inline_data: { mime_type: 'application/pdf', data: (await fileToDataUrl(f)).split(',')[1] } });
+  } else {
+    const n = Math.min(state.files.length, 20);
+    let total = 0;
+    for (let p = 1; p <= n; p++) {
+      const data = canvasToJpeg(await getPageCanvas(p), 1600, 0.85).split(',')[1];
+      total += data.length;
+      if (conn.mode === 'school' && total > 3 * 1048576) { log('Ảnh đề quá lớn để gửi kèm qua khoá chung – chỉ gửi nội dung chữ.', 'warn'); return []; }
+      parts.push({ text: `Ảnh trang ${p} của đề:` });
+      parts.push({ inline_data: { mime_type: 'image/jpeg', data } });
+    }
+  }
+  return parts;
+}
+
+async function solveExam() {
+  const exam = stripSolutions($('#editor').value).trim();
+  if (!exam) return toast('Chưa có đề trong khung Markdown – hãy chuyển đổi đề hoặc dán đề vào trước.');
+  const conn = connection();
+  if (!conn) return;
+  const layout = $('#solveLayout').value;
+  const keyOnly = layout === 'key';
+  state.abort = new AbortController();
+  const t0 = performance.now();
+  setBusy(true, 'Đang chuẩn bị gửi đề cho AI giải…');
+  try {
+    const parts = await sourcePartsForSolve(conn);
+    parts.push({ text: solvePrompt({ detail: $('#solveDetail').value, keyOnly }) + '\n\nĐỀ BÀI (Markdown):\n' + exam.replace(/!\[([^\]]*)\]\(img:\d+\)/g, '[Hình: $1]') });
+    const extra = $('#customPrompt').value.trim();
+    if (extra) parts.push({ text: 'YÊU CẦU BỔ SUNG CỦA GIÁO VIÊN:\n' + extra });
+    let lastPaint = 0;
+    const res = await generate({
+      conn, models: modelChain(), parts, signal: state.abort.signal,
+      onLog: msg => { log(msg, 'warn'); if (msg.startsWith('→')) $('#progressLabel').textContent = msg.slice(2); },
+      onText: t => {
+        const now = performance.now();
+        if (now - lastPaint > 300) { lastPaint = now; const n = (t.match(/@@CAU/g) || []).length; $('#progressLabel').textContent = `AI đang giải… đã xong ${n} câu`; }
+      },
+    });
+    const sols = parseSolution(res.text);
+    log(`Gemini (${res.model}) giải xong ${sols.length} câu (finishReason ${res.finishReason || '—'}).`, 'ok');
+    if (res.finishReason === 'MAX_TOKENS') log('Lời giải bị cắt do quá dài – thử chọn “Ngắn gọn” hoặc giải bớt số trang.', 'err');
+    let md;
+    if (!sols.length) {
+      log('AI không trả về đúng định dạng – chèn nguyên văn lời giải ở cuối đề.', 'warn');
+      md = exam + '\n\n<!-- LOI GIAI: BAT DAU -->\n**LỜI GIẢI**\n\n' + res.text.trim() + '\n';
+    } else if (layout === 'inline') {
+      const r = composeInline(exam, sols);
+      md = r.md;
+      if (r.unmatched) log(`${r.unmatched} câu không khớp được vị trí trong đề – đã đưa xuống cuối đề.`, 'warn');
+    } else {
+      md = composeEnd(exam, sols, { keyOnly });
+    }
+    $('#editor').value = md;
+    renderPreview(); updateStats();
+    log(`Hoàn tất giải đề sau ${((performance.now() - t0) / 1000).toFixed(0)} giây.`, 'ok');
+    toast('Đã giải xong – kiểm tra lại lời giải rồi bấm “Xuất Word”.');
+  } catch (e) {
+    if (e.name === 'AbortError') log('Đã dừng theo yêu cầu.', 'warn');
+    else { log('Giải đề lỗi: ' + e.message, 'err'); toast('Có lỗi – xem nhật ký bên dưới.'); }
+  } finally { setBusy(false); }
+}
+
 // ---------------- preview ----------------
 function mathHtml(tex, display) {
   try { return temml.renderToString(tex, { displayMode: display, throwOnError: true }); }
@@ -458,6 +532,8 @@ function init() {
   $('#btnRun').addEventListener('click', run);
   $('#btnStop').addEventListener('click', () => state.abort?.abort());
   $('#btnWord').addEventListener('click', exportWord);
+  $('#btnSolve').addEventListener('click', solveExam);
+  for (const id of ['solveLayout', 'solveDetail']) { $('#' + id).value = LS.get(id, $('#' + id).value); $('#' + id).addEventListener('change', () => LS.set(id, $('#' + id).value)); }
   $('#btnMd').addEventListener('click', () => download(new Blob([$('#editor').value], { type: 'text/markdown' }), ($('#outName').value.trim() || 'tai-lieu') + '.md'));
   $('#btnCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#editor').value); toast('Đã sao chép Markdown'); } catch { toast('Trình duyệt chặn sao chép'); } });
   let t;
