@@ -146,3 +146,18 @@ export function composeInline(md, sols) {
   if (rest.length) md2 = composeEnd(md2, rest, { keyOnly: false });
   return { md: md2, unmatched: rest.length };
 }
+
+/**
+ * Tách nội dung khung Markdown thành 2 file: đề sạch và đáp án.
+ * - Lời giải chèn sau mỗi câu → file đáp án là bản đề kèm lời giải (bản giáo viên).
+ * - Đáp án/lời giải cuối đề → file đáp án chỉ gồm phần đáp án, lời giải.
+ * answer = null khi chưa có lời giải.
+ */
+export function splitExamAnswer(md) {
+  const exam = stripSolutions(md);
+  const hasInline = md.includes(LG_OPEN);
+  const k = md.indexOf(SOL_START);
+  if (!hasInline && k < 0) return { exam: md, answer: null };
+  const answer = hasInline ? '**BẢN ĐỀ CÓ LỜI GIẢI**\n\n' + md : md.slice(k);
+  return { exam, answer };
+}

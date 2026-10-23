@@ -282,10 +282,11 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
           <select id="solveDetail"><option value="full">Chi tiết</option><option value="short">Ngắn gọn</option></select></div>
       </div>
       <label class="check"><input type="checkbox" id="solveSendFile" checked> Gửi kèm file gốc để AI xem hình vẽ, bảng biến thiên</label>
+      <label class="check"><input type="checkbox" id="splitAnswer" checked> Xuất đề và đáp án thành 2 file Word riêng</label>
       <div style="margin-top:12px">
         <button type="button" class="primary" id="btnSolve">Giải đề</button>
       </div>
-      <div class="hint">Giải nội dung đang có ở khung Markdown (chuyển đổi đề trước, hoặc dán đề vào). Giải lại sẽ thay lời giải cũ. Lời giải do AI tạo – thầy cô cần kiểm tra trước khi dùng; nên chọn mô hình “Pro” để giải chính xác hơn.</div>
+      <div class="hint">Giải nội dung đang có ở khung Markdown (chuyển đổi đề trước, hoặc dán đề vào). Giải lại sẽ thay lời giải cũ. Khi xuất Word sẽ tải về 2 file: <b>tên-đề.docx</b> (chỉ có đề) và <b>tên-đề-dap-an.docx</b> (trình duyệt có thể hỏi cho phép tải nhiều file – chọn Cho phép). Lời giải do AI tạo – thầy cô cần kiểm tra trước khi dùng; nên chọn mô hình “Pro” để giải chính xác hơn.</div>
     </section>
   </aside>
 
