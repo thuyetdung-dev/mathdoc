@@ -19,6 +19,7 @@ node build.mjs      # tạo lại dist/index.html
 - `src/gemini.js` gọi API Gemini (stream, đổi key khi hết lượt)
 - `src/pages.js`  đọc PDF (pdf.js), cắt hình
 - `src/md.js`     phân tích Markdown
+- `src/solve.js`  giải đề: câu lệnh gửi Gemini, bảng đáp án, ghép lời giải vào đề
 - `src/docx.js`   dựng file Word: LaTeX → MathML (temml) → OMML (mathml2omml)
 
 ## Khoá chung của tổ (tuỳ chọn)
@@ -31,3 +32,9 @@ Giới hạn của Vercel: mỗi lần gửi tối đa ~4,5 MB.
 ## Tự dò khoá dùng được
 Nút “🔍 Tự dò khoá dùng được”: dán nhiều khoá, app gọi thử từng khoá (đúng/sai, đã bật Gemini API chưa, còn lượt trong ngày/phút không), rồi “Dùng các khoá tốt” để đặt khoá nhanh nhất làm khoá chính, các khoá còn lại làm dự phòng.
 Ở chế độ khoá chung, máy chủ kiểm tra các khoá trong GEMINI_API_KEY và chỉ trả về khoá đã che bớt (`/api/keycheck`).
+
+## Giải đề
+Mục “4. Giải đề (AI)”: sau khi chuyển đổi (hoặc dán đề vào khung Markdown), bấm “Giải đề”.
+- Cách trình bày: đáp án + lời giải cuối đề / lời giải ngay sau mỗi câu / chỉ bảng đáp án.
+- Bảng đáp án tự dựng theo cấu trúc đề: Phần I (A–D), Phần II (Đ/S từng ý), Phần III (số).
+- Giải lại sẽ thay lời giải cũ. Lời giải do AI tạo, cần kiểm tra trước khi dùng; mô hình “Pro” giải chính xác hơn.

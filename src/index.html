@@ -268,6 +268,25 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
       <label class="check"><input type="checkbox" id="pageBreaks"> Ngắt trang theo trang gốc</label>
       <div class="hint">Công thức xuất dạng Word Equation. Cần MathType thì mở file Word, chọn MathType → Convert Equations.</div>
     </section>
+
+    <section class="card">
+      <h2>4. Giải đề (AI)</h2>
+      <div class="row">
+        <div style="flex:3"><label for="solveLayout">Cách trình bày</label>
+          <select id="solveLayout">
+            <option value="end">Đáp án + lời giải ở cuối đề</option>
+            <option value="inline">Lời giải ngay sau mỗi câu</option>
+            <option value="key">Chỉ bảng đáp án</option>
+          </select></div>
+        <div style="flex:2"><label for="solveDetail">Lời giải</label>
+          <select id="solveDetail"><option value="full">Chi tiết</option><option value="short">Ngắn gọn</option></select></div>
+      </div>
+      <label class="check"><input type="checkbox" id="solveSendFile" checked> Gửi kèm file gốc để AI xem hình vẽ, bảng biến thiên</label>
+      <div style="margin-top:12px">
+        <button type="button" class="primary" id="btnSolve">Giải đề</button>
+      </div>
+      <div class="hint">Giải nội dung đang có ở khung Markdown (chuyển đổi đề trước, hoặc dán đề vào). Giải lại sẽ thay lời giải cũ. Lời giải do AI tạo – thầy cô cần kiểm tra trước khi dùng; nên chọn mô hình “Pro” để giải chính xác hơn.</div>
+    </section>
   </aside>
 
   <section class="results">
