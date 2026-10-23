@@ -120,7 +120,9 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2)}
 footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
 
 .key-box label{margin-top:10px}
-.mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px}
+.mode-switch{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:4px}
+.dctt-home{font-size:13px;font-weight:600;color:var(--accent);text-decoration:none;white-space:nowrap}
+.dctt-home:hover{text-decoration:underline}
 .mode-switch label{margin:0;cursor:pointer}
 .mode-switch input{position:absolute;opacity:0;pointer-events:none}
 .mode-switch span{display:block;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--surface-2);height:100%}
@@ -182,7 +184,8 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
   <div class="logo" aria-hidden="true">∑</div>
   <div class="brand"><h1>MathDoc</h1><p>Chuyển đề Toán từ PDF/ảnh sang Word có công thức Equation</p></div>
   <div class="spacer"></div>
-  <div class="note">File được gửi thẳng từ trình duyệt đến Gemini bằng key của bạn.<br>Không qua máy chủ trung gian.</div>
+  <a class="dctt-home" id="dcttHome" href="/congcu/" hidden>← Tất cả công cụ</a>
+  <div class="note" id="topNote">File được gửi thẳng từ trình duyệt đến Gemini bằng key của bạn.<br>Không qua máy chủ trung gian.</div>
 </header>
 <main>
   <aside class="side">
@@ -190,10 +193,15 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
       <h2>1. Kết nối AI</h2>
       <div class="key-box">
         <div class="mode-switch" role="radiogroup" aria-label="Nguồn khoá AI">
+          <label id="dcttOpt" hidden><input type="radio" name="keyMode" value="dctt"><span><b>AI của tổ</b><small>Đỉnh Cao Trí Tuệ, không cần khoá</small></span></label>
           <label><input type="radio" name="keyMode" value="personal" checked><span><b>Khoá cá nhân</b><small>Dán khoá Gemini của thầy cô</small></span></label>
-          <label><input type="radio" name="keyMode" value="school"><span><b>Khoá chung của tổ</b><small>Nhập mã truy cập</small></span></label>
+          <label id="schoolOpt"><input type="radio" name="keyMode" value="school"><span><b>Khoá chung của tổ</b><small>Nhập mã truy cập</small></span></label>
         </div>
 
+        <div id="dcttBox" hidden>
+          <p class="key-note" id="dcttInfo">Dùng khoá Gemini chung của tổ trên dinhcaotritue.com (quản lý ở trang Công cụ). Mỗi lần chuyển đổi, định vị hình hoặc giải đề tính 1 lượt.</p>
+        </div>
+        <p class="key-note" id="dcttLogin" hidden>Đang mở trên Đỉnh Cao Trí Tuệ: <a href="/">đăng nhập giáo viên V17</a> để dùng <b>AI của tổ</b> (không cần khoá), hoặc dán khoá cá nhân bên dưới.</p>
         <div id="personalBox">
           <label for="key1">🔑 Khoá API Google Gemini</label>
           <div class="key-row">
@@ -220,10 +228,12 @@ footer{text-align:center;font-size:12px;color:var(--ink-3);padding:0 16px 20px}
           <p class="key-note">Khoá Gemini nằm trên máy chủ Vercel, trình duyệt không nhìn thấy. Mỗi lần gửi tối đa khoảng 4 MB dữ liệu (PDF quét dày nên tách nhỏ); tài liệu lớn hơn hãy dùng khoá cá nhân.</p>
         </div>
 
+        <div id="modelWrap">
         <label for="modelSel">Mô hình</label>
         <div class="key-row two">
           <select id="modelSel"><option value="auto">Tự động chọn mô hình</option></select>
           <button type="button" id="btnScan" class="scan">Dò</button>
+        </div>
         </div>
         <div id="keyStatus" class="key-status" data-state="idle"><span class="dot"></span><span class="txt">Chưa kiểm tra kết nối</span></div>
         <p class="key-note" id="privacyNote">Khoá chỉ giữ trong phiên làm việc này và được gửi thẳng tới Google; không đi qua máy chủ nào khác.</p>

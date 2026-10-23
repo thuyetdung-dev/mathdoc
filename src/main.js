@@ -1,7 +1,7 @@
 import temml from 'temml';
 import { parseBlocks } from './md.js';
 import { buildDocx } from './docx.js';
-import { listModels, generate, relocate, pickAuto, fallbackChain } from './gemini.js';
+import { listModels, generate, relocate, pickAuto, fallbackChain, dcttInfo, DCTT_MAX_IMAGES, DCTT_MAX_PDF } from './gemini.js';
 import { initKeyCheck } from './keycheck-ui.js';
 import { tablesToFigures } from './bbt.js';
 import { stripSolutions, solvePrompt, parseSolution, composeEnd, composeInline, splitExamAnswer } from './solve.js';
@@ -59,6 +59,7 @@ function keys() {
 }
 /** Connection for gemini.js, or null (with a toast) when nothing has been entered. */
 function connection() {
+  if (keyMode() === 'dctt') return { mode: 'dctt' };
   if (keyMode() === 'school') {
     const code = $('#accessCode').value.trim();
     if (!code) { toast('Nhập mã truy cập của tổ.'); return null; }
@@ -125,13 +126,17 @@ function initSettings() {
     const m = keyMode();
     $('#personalBox').hidden = m !== 'personal';
     $('#schoolBox').hidden = m !== 'school';
+    $('#dcttBox').hidden = m !== 'dctt';
+    $('#modelWrap').hidden = m === 'dctt';
     $('#privacyNote').textContent = m === 'school'
       ? 'Tài liệu được gửi qua máy chủ Vercel của tổ rồi tới Google. Máy chủ không lưu tài liệu.'
+      : m === 'dctt' ? 'Tài liệu được gửi qua máy chủ dinhcaotritue.com rồi tới Google bằng khoá của tổ. Máy chủ không lưu tài liệu.'
       : 'Khoá chỉ giữ trong phiên làm việc này (trừ khi bật “Ghi nhớ”) và được gửi thẳng tới Google; không đi qua máy chủ nào khác.';
-    if (m === 'school') $('#refImages').checked = false;
+    if (m === 'school' || m === 'dctt') $('#refImages').checked = false;
     LS.set('keyMode', m);
     state.models = []; resetModelList();
-    setKeyStatus('idle', 'Chưa kiểm tra kết nối — bấm “Dò”');
+    if (m === 'dctt') refreshDctt();
+    else setKeyStatus('idle', 'Chưa kiểm tra kết nối — bấm “Dò”');
   };
   document.querySelectorAll('input[name="keyMode"]').forEach(r => r.addEventListener('change', applyMode));
   applyMode();
@@ -161,6 +166,33 @@ function initSettings() {
   });
 }
 
+// ---------------- AI của tổ (khi app chạy trên dinhcaotritue.com) ----------------
+const ON_DCTT = /(^|\.)dinhcaotritue\.com$/i.test(location.hostname);
+async function refreshDctt() {
+  setKeyStatus('busy', 'Đang kiểm tra AI của tổ…');
+  const x = await dcttInfo();
+  if (x.ok) setKeyStatus(x.remaining > 0 ? 'ok' : 'err', `AI của tổ · ${x.model} · còn ${x.remaining}/${x.limit} lượt hôm nay`);
+  else setKeyStatus('err', x.status === 401 ? 'Chưa đăng nhập giáo viên V17' : x.status === 503 ? 'Tổ chưa đặt khoá AI (trang Công cụ)' : 'Không kết nối được AI của tổ');
+  return x;
+}
+async function initDctt() {
+  if (ON_DCTT) {
+    $('#dcttHome').hidden = false;
+    $('#schoolOpt').hidden = true;                                   // khoá chung kiểu Vercel không có ở đây
+    $('#topNote').innerHTML = 'Công cụ của Đỉnh Cao Trí Tuệ.<br>Dùng AI của tổ hoặc khoá Gemini riêng.';
+    if (keyMode() === 'school') { document.querySelector('input[name="keyMode"][value="personal"]').checked = true; document.querySelector('input[name="keyMode"][value="personal"]').dispatchEvent(new Event('change')); }
+  }
+  const x = await dcttInfo();
+  if (!x.ok && x.status !== 503) { if (ON_DCTT) $('#dcttLogin').hidden = false; return; }
+  $('#dcttOpt').hidden = false;
+  $('#dcttHome').hidden = false;
+  const saved = LS.get('keyMode', '');
+  if (!saved || saved === 'dctt' || (saved === 'personal' && !keys().length)) {
+    const r = document.querySelector('input[name="keyMode"][value="dctt"]');
+    r.checked = true; r.dispatchEvent(new Event('change'));
+  }
+}
+
 function resetModelList() {
   const keep = $('#modelSel').value;
   $('#modelSel').innerHTML = '<option value="auto">Tự động chọn mô hình</option>' +
@@ -171,6 +203,7 @@ function resetModelList() {
 async function scanModels() {
   const conn = connection();
   if (!conn) return;
+  if (conn.mode === 'dctt') return refreshDctt();
   setKeyStatus('busy', 'Đang kiểm tra…');
   $('#btnScan').disabled = true;
   try {
@@ -259,10 +292,11 @@ async function run() {
     if (state.kind === 'pdf') {
       const f = state.files[0];
       if (f.size > 19 * 1048576) throw new Error(`File PDF ${fmtSize(f.size)} quá lớn (giới hạn khoảng 19 MB). Hãy tách nhỏ file.`);
+      if (conn.mode === 'dctt' && f.size > DCTT_MAX_PDF) throw new Error(`File PDF ${fmtSize(f.size)} vượt giới hạn ~12 MB của AI của tổ. Hãy tách nhỏ file hoặc dùng khoá cá nhân.`);
       state.pdfDoc = await openPdf(f);
       nPages = Math.min(state.pdfDoc.numPages, maxPages);
       parts.push({ inline_data: { mime_type: 'application/pdf', data: (await fileToDataUrl(f)).split(',')[1] } });
-      if ($('#refImages').checked) {
+      if ($('#refImages').checked && conn.mode !== 'dctt') {   // AI của tổ chỉ nhận tối đa 6 tệp
         setBusy(true, 'Đang tạo ảnh tham chiếu các trang…');
         const lim = Math.min(nPages, 20);
         for (let p = 1; p <= lim; p++) {
@@ -274,6 +308,10 @@ async function run() {
       log(`PDF ${state.pdfDoc.numPages} trang, OCR ${nPages} trang đầu.`);
     } else {
       nPages = Math.min(state.files.length, maxPages);
+      if (conn.mode === 'dctt' && nPages > DCTT_MAX_IMAGES) {
+        log(`AI của tổ nhận tối đa ${DCTT_MAX_IMAGES} ảnh mỗi lần – chỉ chuyển ${DCTT_MAX_IMAGES} ảnh đầu. Ghép ảnh thành PDF để chuyển cả đề.`, 'warn');
+        nPages = DCTT_MAX_IMAGES;
+      }
       for (let p = 1; p <= nPages; p++) {
         const c = await getPageCanvas(p);
         parts.push({ text: `Trang ${p}:` });
@@ -299,7 +337,7 @@ async function run() {
     });
     let md = res.text.replace(/^```(?:markdown|md)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
     model = res.model;
-    log(`Gemini (${res.model}) trả về ${md.length.toLocaleString('vi-VN')} ký tự (${conn.mode === 'school' ? 'khoá chung' : 'khoá #' + (res.keyIndex + 1)}, finishReason ${res.finishReason || '—'}).`, 'ok');
+    log(`Gemini (${res.model}) trả về ${md.length.toLocaleString('vi-VN')} ký tự (${conn.mode === 'school' ? 'khoá chung' : conn.mode === 'dctt' ? 'AI của tổ' : 'khoá #' + (res.keyIndex + 1)}, finishReason ${res.finishReason || '—'}).`, 'ok');
     if (res.finishReason === 'MAX_TOKENS') log('Kết quả bị cắt do vượt giới hạn độ dài. Hãy giảm số trang mỗi lần.', 'err');
 
     // chân trang/đầu trang lặp lại ("Mã đề 357 – Trang 1", "Trang 2/4") lọt vào nội dung → bỏ
@@ -376,12 +414,12 @@ async function sourcePartsForSolve(conn) {
   const parts = [];
   if (state.kind === 'pdf') {
     const f = state.files[0];
-    const limit = conn.mode === 'school' ? 3 * 1048576 : 18 * 1048576;
+    const limit = conn.mode === 'school' ? 3 * 1048576 : conn.mode === 'dctt' ? DCTT_MAX_PDF * 1.37 : 18 * 1048576;
     if (f.size * 1.37 > limit) { log(`File gốc ${fmtSize(f.size)} quá lớn để gửi kèm khi giải – chỉ gửi nội dung chữ.`, 'warn'); return []; }
     parts.push({ text: 'File đề gốc (để xem hình vẽ, bảng biến thiên):' });
     parts.push({ inline_data: { mime_type: 'application/pdf', data: (await fileToDataUrl(f)).split(',')[1] } });
   } else {
-    const n = Math.min(state.files.length, 20);
+    const n = Math.min(state.files.length, conn.mode === 'dctt' ? DCTT_MAX_IMAGES : 20);
     let total = 0;
     for (let p = 1; p <= n; p++) {
       const data = canvasToJpeg(await getPageCanvas(p), 1600, 0.85).split(',')[1];
@@ -537,7 +575,7 @@ function setView(v) {
 }
 
 function init() {
-  initSettings(); initDrop();
+  initSettings(); initDrop(); initDctt();
   $('#btnRun').addEventListener('click', run);
   $('#btnStop').addEventListener('click', () => state.abort?.abort());
   $('#btnWord').addEventListener('click', exportWord);

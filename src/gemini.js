@@ -99,7 +99,53 @@ async function streamOnce({ conn, key, model, body, onText, signal }) {
  * models: list of model ids to try in order (auto mode passes a chain).
  * Returns {text, finishReason, keyIndex, model}.
  */
+// ---- AI của tổ trên dinhcaotritue.com (V17): POST /api/tools?a=ai, khoá Gemini nằm trên máy chủ ----
+export const DCTT_MAX_IMAGES = 6;            // máy chủ nhận tối đa 6 tệp: ảnh + tối đa 1 PDF
+export const DCTT_MAX_PDF = 11.5 * 1048576;   // PDF < ~12 MB
+
+/** Thông tin AI của tổ: {ok, model, limit, used, remaining} | {ok:false, status} */
+export async function dcttInfo() {
+  try {
+    const r = await fetch('/api/tools?a=ai', { credentials: 'same-origin' });
+    const j = await r.json().catch(() => ({}));
+    return r.ok && j.ok ? j : { ok: false, status: r.status, error: j.error };
+  } catch { return { ok: false, status: 0 }; }
+}
+
+async function dcttGenerate({ parts, onText, signal }) {
+  const images = parts.filter(p => p.inline_data).map(p => ({ mimeType: p.inline_data.mime_type, data: p.inline_data.data }));
+  if (images.length > DCTT_MAX_IMAGES) throw new Error(`AI của tổ nhận tối đa ${DCTT_MAX_IMAGES} ảnh/tệp mỗi lần (đang gửi ${images.length}).`);
+  const prompt = parts.filter(p => typeof p.text === 'string').map(p => p.text).join('\n\n');
+  const r = await fetch('/api/tools?a=ai', {
+    method: 'POST', credentials: 'same-origin', signal,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt, images, temperature: 0.1 }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    const why = r.status === 401 ? 'Chưa đăng nhập giáo viên V17 (hoặc phiên đã hết hạn) – đăng nhập lại ở trang chủ dinhcaotritue.com.'
+      : r.status === 503 ? 'Tổ chưa đặt khoá AI – vào trang Công cụ → Khóa API Google Gemini của tổ.'
+      : (j.error || '') + (j.detail ? ' – ' + j.detail : '');
+    throw new Error(`AI của tổ ${r.status}: ${why}`);
+  }
+  const rd = r.body.getReader(), dec = new TextDecoder();
+  let raw = '';
+  for (;;) {
+    const { value, done } = await rd.read();
+    if (done) break;
+    raw += dec.decode(value, { stream: true });
+    const shown = raw.split('\u0000')[0];
+    if (shown) onText?.(shown);
+  }
+  const [text, ...tail] = raw.split('\u0000');
+  const err = tail.find(m => m.startsWith('ERROR'));
+  if (err) throw new Error('AI của tổ báo lỗi: ' + err.replace(/^ERROR:?/, '') + (/SAFETY/.test(err) ? ' (nội dung bị chặn)' : ''));
+  if (!text.trim()) throw new Error('AI của tổ không trả về nội dung.');
+  return { text, finishReason: tail.some(m => m.startsWith('TRUNCATED')) ? 'MAX_TOKENS' : 'STOP', keyIndex: 0, model: 'AI của tổ' };
+}
+
 export async function generate({ conn, models, parts, maxOutputTokens, onText, onLog, signal }) {
+  if (conn.mode === 'dctt') return dcttGenerate({ parts, onText, signal });
   const body = {
     contents: [{ role: 'user', parts }],
     generationConfig: { temperature: 0.1, ...(maxOutputTokens ? { maxOutputTokens } : {}) },
