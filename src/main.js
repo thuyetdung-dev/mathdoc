@@ -22,7 +22,7 @@ QUY TẮC BẮT BUỘC
 5. Bảng (kể cả bảng số liệu, bảng biến thiên đơn giản dạng lưới) viết bằng bảng Markdown có dấu |, giữ đủ hàng, cột, ô trống; nội dung xuống dòng trong ô dùng <br>. Không dùng HTML table.
 6. Hình vẽ, đồ thị, biểu đồ, bảng biến thiên có mũi tên, sơ đồ: đặt trên MỘT DÒNG RIÊNG đúng vị trí của nó trong đề:
    [[HINH:trang,ymin,xmin,ymax,xmax|mô tả ngắn]]
-   trong đó toạ độ là số nguyên thang 0..1000 tính trên TOÀN trang (góc trên-trái (0,0), góc dưới-phải (1000,1000)), thứ tự y trước x. Hộp phải bao trọn hình và nhãn trong hình. Không đánh dấu logo, chữ ký, watermark, số trang, khung trang trí.
+   trong đó toạ độ là số nguyên thang 0..1000 tính trên TOÀN trang (góc trên-trái (0,0), góc dưới-phải (1000,1000)), thứ tự y trước x. Hộp phải bao trọn hình và nhãn trong hình, nhưng KHÔNG lấn sang dòng chữ của đề ở phía trên, dưới hay bên cạnh hình. Không đánh dấu logo, chữ ký, watermark, số trang, khung trang trí.
 7. In đậm bằng **...** cho những chữ in đậm trong đề (ví dụ **Câu 1.**, **PHẦN I.**).
 8. OCR đủ mọi trang được yêu cầu, không bỏ trang, không viết "..." thay cho nội dung. Không bọc kết quả trong \`\`\`. Chỉ trả về Markdown.`;
 
@@ -378,7 +378,7 @@ function renderPreview() {
       out.push(img ? `<figure><img src="${img.dataUrl}" alt="${escapeHtml(b.alt)}"><figcaption>Hình ${b.id}: ${escapeHtml(b.alt)}</figcaption></figure>`
         : `<div class="img-missing">Hình ${b.id}: ${escapeHtml(b.alt)} – chưa có ảnh</div>`);
     } else if (b.type === 'table') {
-      out.push('<div class="tbl-wrap"><table>' + b.rows.map((r, ri) => '<tr>' + r.map(c => `<${ri ? 'td' : 'th'}>${c.map(inlineHtml).join('<br>')}</${ri ? 'td' : 'th'}>`).join('') + '</tr>').join('') + '</table></div>');
+      out.push('<div class="tbl-wrap"><table>' + b.rows.map(r => '<tr>' + r.map(c => `<td>${c.map(inlineHtml).join('<br>')}</td>`).join('') + '</tr>').join('') + '</table></div>');
     }
   }
   $('#preview').innerHTML = out.join('') || '<div class="empty">Kết quả nhận dạng (chữ, công thức, bảng và hình đã cắt) sẽ hiện ở đây.</div>';
@@ -416,7 +416,7 @@ async function exportWord() {
   try {
     const { blob, stats } = await buildDocx(md, state.images, {
       fontName: $('#fontName').value, fontSize: +$('#fontSize').value || 12,
-      pageBreaks: $('#pageBreaks').checked, boldHeader: true,
+      pageBreaks: $('#pageBreaks').checked,   // không tự in đậm hàng đầu bảng: chữ đậm lấy theo **…** trong đề
     });
     download(blob, ($('#outName').value.trim() || 'tai-lieu') + '.docx');
     log(`Đã xuất Word: ${stats.formulas} công thức, ${stats.images} hình, ${stats.tables} bảng.`, 'ok');
